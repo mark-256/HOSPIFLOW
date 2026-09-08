@@ -1,0 +1,43 @@
+import { Request, Response } from 'express'
+import { PrismaClient } from '@hospiflow/database'
+
+const prisma = new PrismaClient()
+
+export class OrganizationsController {
+  async getOrganizations(req: Request, res: Response) {
+    const organizations = await prisma.organization.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    })
+    return res.json({ success: true, data: organizations })
+  }
+
+  async createOrganization(req: Request, res: Response) {
+    const { name, slug } = req.body
+    const organization = await prisma.organization.create({
+      data: { name, slug },
+    })
+    return res.status(201).json({ success: true, data: organization })
+  }
+
+  async getOrganization(req: Request, res: Response) {
+    const organization = await prisma.organization.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+    })
+    if (!organization) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Organization not found' } })
+    }
+    return res.json({ success: true, data: organization })
+  }
+
+  async updateOrganization(req: Request, res: Response) {
+    const { name, status, settings } = req.body
+    const organization = await prisma.organization.update({
+      where: { id: req.params.id },
+      data: { ...(name && { name }), ...(status && { status }), ...(settings && { settings }) },
+    })
+    return res.json({ success: true, data: organization })
+  }
+}
+
+export const organizationsController = new OrganizationsController()

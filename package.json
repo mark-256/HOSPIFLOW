@@ -1,0 +1,55 @@
+{
+  "name": "hospiflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unified Hotel, Restaurant, POS, Inventory & Hospitality Management Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:worker\"",
+    "dev:api": "npm run dev --workspace=@hospiflow/api",
+    "dev:web": "npm run dev --workspace=@hospiflow/web",
+    "dev:worker": "npm run dev --workspace=@hospiflow/worker",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint apps/api/src apps/web apps/worker/src",
+    "typecheck": "tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json",
+    "test": "vitest run --config vitest.workspace.ts",
+    "test:watch": "vitest --config vitest.workspace.ts",
+    "test:e2e": "playwright test",
+    "db:migrate": "npm run db:migrate --workspace=@hospiflow/database",
+    "db:seed": "npm run db:seed --workspace=@hospiflow/database",
+    "db:studio": "npm run db:studio --workspace=@hospiflow/database",
+    "db:reset": "npm run db:reset --workspace=@hospiflow/database",
+    "prepare": "husky install"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.3.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^2.1.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
