@@ -35,6 +35,7 @@ import loyaltyRoutes from './routes/loyalty'
 import qrRoutes from './routes/qr'
 import guestPortalRoutes from './routes/guestPortal'
 import healthRoutes from './routes/health'
+import backupRoutes from './routes/backups'
 
 const app = express()
 
@@ -81,6 +82,7 @@ app.use('/api/online-orders', onlineOrdersRoutes)
 app.use('/api/loyalty', loyaltyRoutes)
 app.use('/api/qr', qrRoutes)
 app.use('/api/guest-portal', guestPortalRoutes)
+app.use('/api/admin/backups', backupRoutes)
 
 app.use(notFoundHandler)
 app.use(errorHandler)

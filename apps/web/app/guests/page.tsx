@@ -1,29 +1,51 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export default function GuestsPage() {
-  const [guests, setGuests] = useState([])
+  const [guests, setGuests] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({ propertyId: '', firstName: '', lastName: '', email: '', phone: '', nationality: '', idNumber: '', idType: '', address: '', city: '', country: '', isVip: false })
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : ''
 
-  const fetchGuests = async () => {
+  const fetchGuests = useCallback(async () => {
     setLoading(true)
-    const res = await fetch('/api/guests', { headers: { Authorization: `Bearer ${token}` } })
-    const json = await res.json()
-    if (json.success) setGuests(json.data)
-    setLoading(false)
-  }
+    setError('')
+    try {
+      const res = await fetch('/api/guests', { headers: { Authorization: `Bearer ${token}` } })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(json?.error?.message || `Request failed with status ${res.status}`)
+      }
+      setGuests(json.data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load guests')
+      setGuests([])
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
 
-  useEffect(() => { void fetchGuests() }, [])
+  useEffect(() => { void fetchGuests() }, [fetchGuests])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const res = await fetch('/api/guests', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(form) })
-    if (res.ok) { setShowForm(false); setForm({ propertyId: '', firstName: '', lastName: '', email: '', phone: '', nationality: '', idNumber: '', idType: '', address: '', city: '', country: '', isVip: false }); fetchGuests() }
+    setError('')
+    try {
+      const res = await fetch('/api/guests', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(form) })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(json?.error?.message || `Request failed with status ${res.status}`)
+      }
+      setShowForm(false)
+      setForm({ propertyId: '', firstName: '', lastName: '', email: '', phone: '', nationality: '', idNumber: '', idType: '', address: '', city: '', country: '', isVip: false })
+      await fetchGuests()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save guest')
+    }
   }
 
   return (
@@ -33,6 +55,11 @@ export default function GuestsPage() {
           <h1 className="text-3xl font-bold text-hospiflow-900">Guests</h1>
           <button onClick={() => setShowForm(!showForm)} className="bg-primary-600 text-white px-4 py-2 rounded-md hover:bg-primary-700">Add Guest</button>
         </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
         {showForm && (
           <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <input className="border rounded p-2" placeholder="Property ID" value={form.propertyId} onChange={e => setForm({ ...form, propertyId: e.target.value })} />

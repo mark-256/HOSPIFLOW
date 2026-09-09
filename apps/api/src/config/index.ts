@@ -30,4 +30,7 @@ export const config = {
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
   sessionSecret: process.env.SESSION_SECRET || 'change-me-in-production',
   sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || '86400000', 10),
+  backupDir: process.env.BACKUP_DIR || './backups',
+  backupRetentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS || '7', 10),
+  backupSchedule: process.env.BACKUP_SCHEDULE || '0 2 * * *',
 }

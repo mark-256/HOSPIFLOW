@@ -7,7 +7,7 @@ const prisma = new PrismaClient()
 export const guestsController = {
   list: async (req: Request, res: Response) => {
     const { propertyId, search, isVip, page, limit } = req.query
-    const where: any = { deletedAt: null, property: { organizationId: (req as AuthenticatedRequest).user!.organizationId } }
+    const where: any = { property: { organizationId: (req as AuthenticatedRequest).user!.organizationId } }
     if (propertyId) where.propertyId = String(propertyId)
     if (isVip !== undefined) where.isVip = isVip === 'true'
     if (search) {

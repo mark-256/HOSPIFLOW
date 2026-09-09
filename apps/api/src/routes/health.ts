@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { PrismaClient } from '@hospiflow/database'
+import { asyncHandler } from '../utils/asyncHandler'
 
 const router = Router()
 const prisma = new PrismaClient()
 
-router.get('/health', async (_req, res) => {
+router.get('/health', asyncHandler(async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`
     res.json({
@@ -24,7 +25,7 @@ router.get('/health', async (_req, res) => {
       },
     })
   }
-})
+}))
 
 router.get('/ready', (_req, res) => {
   res.json({
