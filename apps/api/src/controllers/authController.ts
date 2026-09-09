@@ -1,6 +1,7 @@
-import { Request, Response } from 'express'
+import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
+import { randomUUID } from 'crypto'
 import { PrismaClient } from '@hospiflow/database'
 import { config } from '../config'
 import { AuthenticatedRequest } from '../middleware/auth'
@@ -8,7 +9,8 @@ import { AuthenticatedRequest } from '../middleware/auth'
 const prisma = new PrismaClient()
 
 export const authController = {
-  login: async (req: Request, res: Response) => {
+  login: async (req: Request, res: Response, next: NextFunction) => {
+    try {
     const { email, password } = req.body
 
     if (!email || !password) {
@@ -46,7 +48,7 @@ export const authController = {
     )
 
     const refreshToken = jwt.sign(
-      { userId: user.id, organizationId: user.organizationId },
+      { userId: user.id, organizationId: user.organizationId, jti: randomUUID() },
       config.jwtRefreshSecret as jwt.Secret,
       { expiresIn: config.jwtRefreshExpiry as any }
     )
@@ -91,7 +93,10 @@ export const authController = {
           },
         },
       },
-    })
+      })
+    } catch (error) {
+      next(error)
+    }
   },
 
   me: async (req: AuthenticatedRequest, res: Response) => {
