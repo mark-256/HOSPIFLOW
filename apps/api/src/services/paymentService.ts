@@ -144,7 +144,7 @@ export const paymentService = {
   },
 
   verifyPayment: async (req: AuthenticatedRequest, res: Response) => {
-    const { paymentId } = req.params
+    const { paymentId } = req.body
 
     if (!paymentId) {
       throw new BadRequestError('paymentId is required')
@@ -216,7 +216,7 @@ export const paymentService = {
   },
 
   refundPayment: async (req: AuthenticatedRequest, res: Response) => {
-    const { paymentId } = req.params
+    const { paymentId } = req.body
     const { amount, reason } = req.body as RefundRequest
 
     if (!paymentId || !amount) {

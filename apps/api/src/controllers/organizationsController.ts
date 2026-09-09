@@ -1,12 +1,13 @@
 import { Request, Response } from 'express'
 import { PrismaClient } from '@hospiflow/database'
+import { AuthenticatedRequest } from '../middleware/auth'
 
 const prisma = new PrismaClient()
 
 export const organizationsController = {
-  getOrganizations: async (req: Request, res: Response) => {
+  getOrganizations: async (req: AuthenticatedRequest, res: Response) => {
     const organizations = await prisma.organization.findMany({
-      where: { deletedAt: null },
+      where: { id: req.user!.organizationId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     })
     return res.json({ success: true, data: organizations })
@@ -26,7 +27,10 @@ export const organizationsController = {
     return res.status(201).json({ success: true, data: organization })
   },
 
-  getOrganization: async (req: Request, res: Response) => {
+  getOrganization: async (req: AuthenticatedRequest, res: Response) => {
+    if (req.params.id !== req.user!.organizationId) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Organization not found' } })
+    }
     const organization = await prisma.organization.findFirst({
       where: { id: req.params.id, deletedAt: null },
     })

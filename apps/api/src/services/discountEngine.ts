@@ -75,7 +75,7 @@ export function calculateDiscount(
 
   if (discountInput.type === 'PERCENTAGE') {
     const percentCents = toCents(discountInput.value)
-    if (percentCents > 10000) {
+    if (percentCents >= 10000) {
       throw new ValidationError('Discount percentage cannot exceed 100%')
     }
 
@@ -102,8 +102,8 @@ export function calculateDiscount(
     throw new ValidationError(`Unsupported discount type: ${String(discountInput.type)}`)
   }
 
-  if (discountCents >= subCents) {
-    throw new ValidationError('Discount amount cannot equal or exceed subtotal')
+  if (discountCents > subCents) {
+    throw new ValidationError('Discount amount cannot exceed subtotal')
   }
 
   const finalCents = subCents - discountCents

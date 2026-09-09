@@ -50,6 +50,26 @@ export function errorHandler(
     })
   }
 
+  const prismaErr = err as { code?: string; meta?: { target?: string } }
+  if (prismaErr.code === 'P2025') {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Resource not found',
+      },
+    })
+  }
+  if (prismaErr.code === 'P2002') {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'CONFLICT',
+        message: 'Resource already exists',
+      },
+    })
+  }
+
   return res.status(500).json({
     success: false,
     error: {

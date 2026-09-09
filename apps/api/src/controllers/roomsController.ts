@@ -25,13 +25,16 @@ export const roomsController = {
     if (!propertyId || !roomTypeId || !roomNumber) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Property, room type, and room number are required' } })
     }
+    const property = await prisma.property.findFirst({ where: { id: propertyId, organizationId: req.user!.organizationId, deletedAt: null } })
+    if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
     const room = await prisma.room.create({ data: { propertyId, roomTypeId, roomNumber, floor, building, notes, status: RoomStatus.AVAILABLE } })
     return res.status(201).json({ success: true, data: room })
   },
 
   update: async (req: AuthenticatedRequest, res: Response) => {
     const { status, notes } = req.body
-    const room = await prisma.room.update({ where: { id: req.params.id }, data: { status, notes } })
+    const room = await prisma.room.update({ where: { id: req.params.id, property: { organizationId: req.user!.organizationId } }, data: { status, notes } })
+    if (!room) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Room not found' } })
     return res.json({ success: true, data: room })
   },
 }

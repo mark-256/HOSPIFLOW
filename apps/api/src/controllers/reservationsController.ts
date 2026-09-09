@@ -6,9 +6,9 @@ const prisma = new PrismaClient()
 type TransactionClient = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => Promise<any> ? T : never
 
 export const reservationsController = {
-  list: async (req: Request, res: Response) => {
+   list: async (req: AuthenticatedRequest, res: Response) => {
     const { propertyId, status, from, to, page, limit } = req.query
-    const where: any = {}
+    const where: any = { property: { organizationId: req.user!.organizationId } }
     if (propertyId) where.propertyId = String(propertyId)
     if (status) where.status = String(status)
     if (from) where.checkInDate = { ...where.checkInDate, gte: new Date(String(from)) }
@@ -32,26 +32,30 @@ export const reservationsController = {
     if (checkIn >= checkOut) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Check-out must be after check-in' } })
     }
+    const property = await prisma.property.findFirst({ where: { id: propertyId, organizationId: req.user!.organizationId, deletedAt: null } })
+    if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
     const confirmationCode = `RES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
     const reservation = await prisma.$transaction(async (tx: TransactionClient) => {
       if (roomId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${roomId}))`
         const overlapping = await tx.reservation.findFirst({
           where: {
             roomId,
-            status: { in: [ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN] },
+            status: { in: [ReservationStatus.PENDING, ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN] },
             OR: [
               { checkInDate: { lt: checkOut }, checkOutDate: { gt: checkIn } },
             ],
           },
         })
         if (overlapping) {
-          throw new Error('Room is already booked for the selected dates')
+          return res.status(400).json({ success: false, error: { code: 'CONFLICT', message: 'Room is already booked for the selected dates' } })
         }
       }
       return tx.reservation.create({
         data: { propertyId, guestId, roomTypeId, roomId, confirmationCode, checkInDate: checkIn, checkOutDate: checkOut, adults, children: children ?? 0, ratePlanId, rate: rate ? parseFloat(rate) : 0, depositAmount: depositAmount ? parseFloat(depositAmount) : null, depositPaid: depositPaid ?? false, specialRequests, source, notes },
       })
     })
+    if (!reservation || !reservation.id) return
     await prisma.auditLog.create({
       data: {
         organizationId: req.user!.organizationId,
@@ -66,8 +70,8 @@ export const reservationsController = {
     return res.status(201).json({ success: true, data: reservation })
   },
 
-  get: async (req: Request, res: Response) => {
-    const reservation = await prisma.reservation.findFirst({ where: { id: req.params.id }, include: { guest: true, roomType: true, room: true, folios: true } })
+   get: async (req: AuthenticatedRequest, res: Response) => {
+    const reservation = await prisma.reservation.findFirst({ where: { id: req.params.id, property: { organizationId: req.user!.organizationId } }, include: { guest: true, roomType: true, room: true, folios: true } })
     if (!reservation) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Reservation not found' } })
     return res.json({ success: true, data: reservation })
   },
@@ -82,8 +86,8 @@ export const reservationsController = {
       [ReservationStatus.CANCELLED]: [],
       [ReservationStatus.NO_SHOW]: [],
     }
-    const reservation = await prisma.reservation.findUnique({ where: { id: req.params.id } })
-    if (!reservation) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Reservation not found' } })
+    const reservation = await prisma.reservation.findUnique({ where: { id: req.params.id }, include: { property: { select: { organizationId: true } } } })
+    if (!reservation || reservation.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Reservation not found' } })
     const currentStatus = reservation.status as ReservationStatus
     const nextStatus = status as ReservationStatus
     if (!Object.values(ReservationStatus).includes(nextStatus)) {

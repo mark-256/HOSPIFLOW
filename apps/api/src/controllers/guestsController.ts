@@ -27,29 +27,32 @@ export const guestsController = {
     return res.json(paginatedResponse(guests, p, l, total))
   },
 
-  create: async (req: Request, res: Response) => {
+  create: async (req: AuthenticatedRequest, res: Response) => {
     const { propertyId, firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth, address, city, country, preferences, notes, isVip } = req.body as any
     if (!propertyId || !firstName || !lastName) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Property, first name, and last name are required' } })
     }
+    const property = await prisma.property.findFirst({ where: { id: propertyId, organizationId: req.user!.organizationId, deletedAt: null } })
+    if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
     const guest = await prisma.guest.create({
       data: { propertyId, firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined, address, city, country, preferences, notes, isVip: isVip ?? false },
     })
     return res.status(201).json({ success: true, data: guest })
   },
 
-  get: async (req: Request, res: Response) => {
-    const guest = await prisma.guest.findFirst({ where: { id: req.params.id } })
+   get: async (req: AuthenticatedRequest, res: Response) => {
+    const guest = await prisma.guest.findFirst({ where: { id: req.params.id, property: { organizationId: req.user!.organizationId } } })
     if (!guest) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
     return res.json({ success: true, data: guest })
   },
 
-  update: async (req: Request, res: Response) => {
+  update: async (req: AuthenticatedRequest, res: Response) => {
     const { firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth, address, city, country, preferences, notes, isVip, isBlacklisted } = req.body
     const guest = await prisma.guest.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, property: { organizationId: req.user!.organizationId } },
       data: { firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined, address, city, country, preferences, notes, isVip, isBlacklisted },
     })
+    if (!guest) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
     return res.json({ success: true, data: guest })
   },
 }

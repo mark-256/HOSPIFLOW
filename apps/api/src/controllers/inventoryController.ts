@@ -21,11 +21,11 @@ export const inventoryController = {
 
   create: async (req: AuthenticatedRequest, res: Response) => {
     const { organizationId, name, sku, description, category, unit, unitCost, reorderLevel, minStockLevel, maxStockLevel, expiryTracking } = req.body as any
-    const orgId = organizationId || req.user!.organizationId
-    if (!orgId || !name || !sku || !unit) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Organization, name, SKU, and unit are required' } })
+    const orgId = req.user!.organizationId
+    if (!name || !sku || !unit) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Name, SKU, and unit are required' } })
     }
-    const item = await prisma.inventoryItem.create({ data: { organizationId: orgId, name, sku, description, category, unit, unitCost: parseFloat(unitCost), reorderLevel: parseFloat(reorderLevel) || 0, minStockLevel: parseFloat(minStockLevel) || 0, maxStockLevel: maxStockLevel ? parseFloat(maxStockLevel) : null, expiryTracking: expiryTracking ?? false } })
+    const item = await prisma.inventoryItem.create({ data: { organizationId: orgId, name, sku, description, category, unit, unitCost: parseFloat(unitCost) || 0, reorderLevel: parseFloat(reorderLevel) || 0, minStockLevel: parseFloat(minStockLevel) || 0, maxStockLevel: maxStockLevel ? parseFloat(maxStockLevel) : null, expiryTracking: expiryTracking ?? false } })
     return res.status(201).json({ success: true, data: item })
   },
 

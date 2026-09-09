@@ -86,7 +86,7 @@ export const authController = {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role.name,
-          permissions: user.role.permissions.map((p: any) => p.name),
+          permissions: user.role.permissions,
           organization: {
             id: user.organization.id,
             name: user.organization.name,
@@ -127,7 +127,7 @@ export const authController = {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role.name,
-        permissions: user.role.permissions.map((p: any) => p.name),
+        permissions: user.role.permissions,
         organization: {
           id: user.organization.id,
           name: user.organization.name,

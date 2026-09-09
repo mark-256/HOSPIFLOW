@@ -13,9 +13,9 @@ function toDecimal(value: unknown): number {
 }
 
 export const ordersController = {
-  list: async (req: Request, res: Response) => {
+   list: async (req: AuthenticatedRequest, res: Response) => {
     const { outletId, status, tableId, from, to, page, limit } = req.query
-    const where: any = {}
+    const where: any = { outlet: { property: { organizationId: req.user!.organizationId } } }
     if (outletId) where.outletId = String(outletId)
     if (status) where.status = String(status)
     if (tableId) where.tableId = String(tableId)
@@ -31,13 +31,39 @@ export const ordersController = {
   },
 
   create: async (req: AuthenticatedRequest, res: Response) => {
+    const idempotencyKey = req.headers['idempotency-key'] as string | undefined
     const { outletId, tableId, orderType, guestId, customerName, customerPhone, roomNumber, covers, notes } = req.body as any
     if (!outletId || !orderType) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Outlet and order type are required' } })
     }
+    const outlet = await prisma.outlet.findFirst({ where: { id: outletId, property: { organizationId: req.user!.organizationId } } })
+    if (!outlet) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Outlet not found' } })
+    if (idempotencyKey) {
+      const existing = await prisma.order.findFirst({
+        where: {
+          outletId,
+          notes: { contains: `idem:${idempotencyKey}` },
+        },
+      })
+      if (existing) {
+        return res.status(200).json({ success: true, data: existing, meta: { deduplicated: true } })
+      }
+    }
     const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
     const order = await prisma.order.create({
-      data: { outletId, tableId, orderNumber, orderType: orderType as OrderType, guestId, customerName, customerPhone, roomNumber, covers: covers ? parseInt(covers) : null, notes, createdById: req.user?.id },
+      data: {
+        outletId,
+        tableId,
+        orderNumber,
+        orderType: orderType as OrderType,
+        guestId,
+        customerName,
+        customerPhone,
+        roomNumber,
+        covers: covers ? parseInt(covers) : null,
+        notes: notes ? `${notes} | idem:${idempotencyKey}` : (idempotencyKey ? `idem:${idempotencyKey}` : null),
+        createdById: req.user?.id,
+      },
     })
     await prisma.auditLog.create({
       data: {
@@ -53,8 +79,8 @@ export const ordersController = {
     return res.status(201).json({ success: true, data: order })
   },
 
-  get: async (req: Request, res: Response) => {
-    const order = await prisma.order.findFirst({ where: { id: req.params.id }, include: { items: { include: { modifiers: true } }, payments: true, table: true, guest: true } })
+  get: async (req: AuthenticatedRequest, res: Response) => {
+    const order = await prisma.order.findFirst({ where: { id: req.params.id, outlet: { property: { organizationId: req.user!.organizationId } } }, include: { items: { include: { modifiers: true } }, payments: true, table: true, guest: true } })
     if (!order) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
     return res.json({ success: true, data: order })
   },
@@ -71,8 +97,8 @@ export const ordersController = {
       [OrderStatus.COMPLETED]: [],
       [OrderStatus.CANCELLED]: [],
     }
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } })
-    if (!order) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { outlet: { select: { property: { select: { organizationId: true } } } } } })
+    if (!order || order.outlet.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
     const currentStatus = order.status as OrderStatus
     const nextStatus = status as OrderStatus
     if (!Object.values(OrderStatus).includes(nextStatus)) {
@@ -90,7 +116,7 @@ export const ordersController = {
       if (!orderWithItems) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
       }
-      await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.COMPLETED, completedAt: new Date() } })
+      const completed = await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.COMPLETED, completedAt: new Date() } })
       for (const item of orderWithItems.items) {
         const recipe = await prisma.recipe.findUnique({ where: { productId: item.productId }, include: { ingredients: true } })
         if (recipe && recipe.ingredients.length > 0) {
@@ -114,14 +140,14 @@ export const ordersController = {
         data: {
           organizationId: req.user!.organizationId,
           userId: req.user!.id,
-          action: 'ORDER_CANCELLED',
+          action: 'ORDER_COMPLETED',
           entity: 'Order',
           entityId: order.id,
           ip: req.ip || undefined,
           userAgent: req.headers['user-agent'] || undefined,
         },
       })
-      return res.json({ success: true, data: order })
+      return res.json({ success: true, data: completed })
     }
     if (nextStatus === OrderStatus.CANCELLED) {
       data.cancelledAt = new Date()
@@ -136,6 +162,18 @@ export const ordersController = {
           userAgent: req.headers['user-agent'] || undefined,
         },
       })
+    } else {
+      await prisma.auditLog.create({
+        data: {
+          organizationId: req.user!.organizationId,
+          userId: req.user!.id,
+          action: 'ORDER_MODIFIED',
+          entity: 'Order',
+          entityId: order.id,
+          ip: req.ip || undefined,
+          userAgent: req.headers['user-agent'] || undefined,
+        },
+      })
     }
     const updated = await prisma.order.update({ where: { id: order.id }, data })
     return res.json({ success: true, data: updated })
@@ -143,8 +181,8 @@ export const ordersController = {
 
   addItem: async (req: AuthenticatedRequest, res: Response) => {
     const { productId, productName, productCode, quantity, unitPrice, notes } = req.body
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } })
-    if (!order) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { outlet: { select: { property: { select: { organizationId: true } } } } } })
+    if (!order || order.outlet.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
     if (!productId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Product ID is required' } })
     }
@@ -163,18 +201,18 @@ export const ordersController = {
   pay: async (req: AuthenticatedRequest, res: Response) => {
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined
     const { paymentMethod, amount, reference, provider } = req.body
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } })
-    if (!order) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { outlet: { select: { property: { select: { organizationId: true } } } } } })
+    if (!order || order.outlet.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
     const amountNum = toDecimal(amount)
-    const balance = Math.round(Number(order.balance) * 100) / 100
-    if (amountNum > balance) {
-      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Amount exceeds balance' } })
-    }
     if (idempotencyKey) {
       const existing = await prisma.orderPayment.findFirst({ where: { orderId: order.id, reference: idempotencyKey } })
       if (existing) {
         return res.status(200).json({ success: true, data: existing, meta: { deduplicated: true } })
       }
+    }
+    const balance = Math.round(Number(order.balance) * 100) / 100
+    if (amountNum > balance) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Amount exceeds balance' } })
     }
     const payment = await prisma.orderPayment.create({
       data: {

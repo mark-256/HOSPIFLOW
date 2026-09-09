@@ -1,14 +1,13 @@
 import { Request, Response } from 'express'
 import { PrismaClient } from '@hospiflow/database'
+import { AuthenticatedRequest } from '../middleware/auth'
 
 const prisma = new PrismaClient()
 
 export const propertiesController = {
-  getProperties: async (req: Request, res: Response) => {
-    const { organizationId } = req.query
-    const where = organizationId ? { organizationId: String(organizationId) } : {}
+  getProperties: async (req: AuthenticatedRequest, res: Response) => {
     const properties = await prisma.property.findMany({
-      where: { ...where, deletedAt: null },
+      where: { organizationId: req.user!.organizationId, deletedAt: null },
       include: {
         organization: true,
         _count: { select: { outlets: true, rooms: true, guests: true } },
@@ -18,17 +17,17 @@ export const propertiesController = {
     return res.json({ success: true, data: properties })
   },
 
-  createProperty: async (req: Request, res: Response) => {
-    const { organizationId, name, code, address, city, country, phone, email, timezone, currency } = req.body
-    if (!organizationId || !name || !code) {
+  createProperty: async (req: AuthenticatedRequest, res: Response) => {
+    const { name, code, address, city, country, phone, email, timezone, currency } = req.body
+    if (!name || !code) {
       return res.status(400).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Organization ID, name, and code are required' },
+        error: { code: 'VALIDATION_ERROR', message: 'Name and code are required' },
       })
     }
     const property = await prisma.property.create({
       data: {
-        organizationId,
+        organizationId: req.user!.organizationId,
         name,
         code,
         address,
@@ -45,9 +44,10 @@ export const propertiesController = {
     return res.status(201).json({ success: true, data: property })
   },
 
-  getProperty: async (req: Request, res: Response) => {
+  getProperty: async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params
     const property = await prisma.property.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id, organizationId: req.user!.organizationId, deletedAt: null },
       include: { organization: true, outlets: true, rooms: true },
     })
     if (!property) {
@@ -56,10 +56,10 @@ export const propertiesController = {
     return res.json({ success: true, data: property })
   },
 
-  updateProperty: async (req: Request, res: Response) => {
+  updateProperty: async (req: AuthenticatedRequest, res: Response) => {
     const { name, status, address, city, country, phone, email, timezone, currency, settings } = req.body
     const property = await prisma.property.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
       data: {
         ...(name && { name }),
         ...(status && { status }),
@@ -77,5 +77,3 @@ export const propertiesController = {
     return res.json({ success: true, data: property })
   }
 }
-
-

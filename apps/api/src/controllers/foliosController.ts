@@ -42,24 +42,26 @@ export const foliosController = {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Cannot add transactions to a closed folio' } })
     }
     const amountNum = toDecimal(amount)
-    const isDebit = type === 'CHARGE' || type === 'TAX' || type === 'SERVICE_CHARGE' || type === 'DISCOUNT'
+    const isDebit = type === 'CHARGE' || type === 'TAX' || type === 'SERVICE_CHARGE'
+    const isCredit = type === 'PAYMENT' || type === 'REFUND' || type === 'DISCOUNT'
     const currentBalance = Math.round(Number(folio.balance) * 100) / 100
     const newBalance = isDebit ? Math.round((currentBalance + amountNum) * 100) / 100 : Math.round((currentBalance - amountNum) * 100) / 100
-    if (!isDebit && newBalance < 0) {
+    if (!isDebit && !isCredit) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Invalid transaction type' } })
+    }
+    if (isCredit && newBalance < 0) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Payment would result in negative folio balance' } })
     }
     const transaction = await prisma.folioTransaction.create({ data: { folioId: folio.id, type, category, description, amount: amountNum, reference, sourceId, sourceType, createdBy: req.user?.id } })
     const updateData: any = { balance: newBalance }
     if (isDebit) {
       updateData.totalCharges = { increment: amountNum }
-      if (type === 'DISCOUNT') {
-        updateData.totalDiscount = { increment: amountNum }
-      }
-    } else {
+    } else if (type === 'PAYMENT') {
       updateData.totalPayments = { increment: amountNum }
-      if (type === 'REFUND') {
-        updateData.totalRefunds = { increment: amountNum }
-      }
+    } else if (type === 'REFUND') {
+      updateData.totalRefunds = { increment: amountNum }
+    } else if (type === 'DISCOUNT') {
+      updateData.totalDiscount = { increment: amountNum }
     }
     await prisma.folio.update({ where: { id: folio.id }, data: updateData })
     return res.status(201).json({ success: true, data: transaction })

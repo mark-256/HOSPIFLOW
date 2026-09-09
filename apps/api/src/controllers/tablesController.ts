@@ -7,7 +7,7 @@ const prisma = new PrismaClient()
 export const tablesController = {
   list: async (req: AuthenticatedRequest, res: Response) => {
     const { outletId, page, limit } = req.query
-    const where: any = {}
+    const where: any = { outlet: { property: { organizationId: req.user!.organizationId } } }
     if (outletId) where.outletId = String(outletId)
     const { page: p, limit: l, skip } = (await import('../utils/pagination.js')).parsePagination(req.query as Record<string, unknown>)
     const [tables, total] = await Promise.all([
@@ -31,7 +31,8 @@ export const tablesController = {
 
   update: async (req: AuthenticatedRequest, res: Response) => {
     const { status, name, capacity } = req.body
-    const table = await prisma.table.update({ where: { id: req.params.id }, data: { status, name, capacity } })
+    const table = await prisma.table.update({ where: { id: req.params.id, outlet: { property: { organizationId: req.user!.organizationId } } }, data: { status, name, capacity } })
+    if (!table) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Table not found' } })
     return res.json({ success: true, data: table })
   },
 }
