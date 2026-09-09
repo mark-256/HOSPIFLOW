@@ -1,12 +1,13 @@
 import { Request, Response } from 'express'
 import { PrismaClient } from '@hospiflow/database'
+import { AuthenticatedRequest } from '../middleware/auth'
 
 const prisma = new PrismaClient()
 
 export const guestsController = {
   list: async (req: Request, res: Response) => {
-    const { propertyId, search, isVip } = req.query
-    const where: any = { deletedAt: null }
+    const { propertyId, search, isVip, page, limit } = req.query
+    const where: any = { deletedAt: null, property: { organizationId: (req as AuthenticatedRequest).user!.organizationId } }
     if (propertyId) where.propertyId = String(propertyId)
     if (isVip !== undefined) where.isVip = isVip === 'true'
     if (search) {
@@ -17,8 +18,13 @@ export const guestsController = {
         { phone: { contains: String(search), mode: 'insensitive' } },
       ]
     }
-    const guests = await prisma.guest.findMany({ where, orderBy: { createdAt: 'desc' } })
-    return res.json({ success: true, data: guests })
+    const { page: p, limit: l, skip } = (await import('../utils/pagination.js')).parsePagination(req.query as Record<string, unknown>)
+    const [guests, total] = await Promise.all([
+      prisma.guest.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: l }),
+      prisma.guest.count({ where }),
+    ])
+    const { paginatedResponse } = await import('../utils/pagination.js')
+    return res.json(paginatedResponse(guests, p, l, total))
   },
 
   create: async (req: Request, res: Response) => {
