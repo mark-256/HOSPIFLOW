@@ -4,6 +4,7 @@ import { getApp, setupTestDatabase, getSeedData, getPrisma, disconnect } from '.
 import { login, authHeaders, AuthTokens } from './helpers/auth'
 import { calculateTaxes } from '../../src/services/taxEngine'
 import { calculateDiscount } from '../../src/services/discountEngine'
+import { Prisma } from '@hospiflow/database'
 import { Express } from 'express'
 
 let app: Express
@@ -164,7 +165,7 @@ describe('Idempotency Integration Tests', () => {
     const subtotal = 99.99
     const taxResult = await calculateTaxes({
       subtotal,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
     })
 
     const discountInput = {
@@ -177,7 +178,7 @@ describe('Idempotency Integration Tests', () => {
     // Recalculate
     const taxResult2 = await calculateTaxes({
       subtotal,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
     })
 
     const discountResult2 = calculateDiscount(taxResult2.grandTotal, discountInput, 'CASHIER', permissions)

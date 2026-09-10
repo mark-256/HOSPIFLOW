@@ -35,7 +35,7 @@ export const reservationsController = {
     const property = await prisma.property.findFirst({ where: { id: propertyId, organizationId: req.user!.organizationId, deletedAt: null } })
     if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
     const confirmationCode = `RES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
-    const reservation = await prisma.$transaction(async (tx: TransactionClient) => {
+    const reservation = await prisma.$transaction(async (tx: TransactionClient): Promise<Awaited<ReturnType<typeof prisma.reservation.create>> | null> => {
       if (roomId) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${roomId}))`
         const overlapping = await tx.reservation.findFirst({
@@ -48,14 +48,14 @@ export const reservationsController = {
           },
         })
         if (overlapping) {
-          return res.status(400).json({ success: false, error: { code: 'CONFLICT', message: 'Room is already booked for the selected dates' } })
+          return null
         }
       }
       return tx.reservation.create({
         data: { propertyId, guestId, roomTypeId, roomId, confirmationCode, checkInDate: checkIn, checkOutDate: checkOut, adults, children: children ?? 0, ratePlanId, rate: rate ? parseFloat(rate) : 0, depositAmount: depositAmount ? parseFloat(depositAmount) : null, depositPaid: depositPaid ?? false, specialRequests, source, notes },
       })
     })
-    if (!reservation || !reservation.id) return
+    if (!reservation) return res.status(400).json({ success: false, error: { code: 'CONFLICT', message: 'Room is already booked for the selected dates' } })
     await prisma.auditLog.create({
       data: {
         organizationId: req.user!.organizationId,

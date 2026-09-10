@@ -26,10 +26,10 @@ describe('Inventory Integration Tests', () => {
     const prisma = await getPrisma()
 
     // Get initial stock
-    const itemBefore = await prisma.inventoryItem.findUnique({
-      where: { id: seedData.orgA.inventoryItemId },
+    const movementsBefore = await prisma.stockMovement.findMany({
+      where: { inventoryItemId: seedData.orgA.inventoryItemId },
     })
-    const initialStock = itemBefore!.quantity
+    const initialStock = movementsBefore.reduce((sum, movement) => sum + Number(movement.quantity), 0)
 
     // Create order
     const orderRes = await request(app)

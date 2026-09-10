@@ -4,6 +4,7 @@ import { getApp, setupTestDatabase, getSeedData, getPrisma, disconnect } from '.
 import { login, authHeaders, AuthTokens } from './helpers/auth'
 import { calculateTaxes } from '../../src/services/taxEngine'
 import { calculateDiscount, DiscountInput } from '../../src/services/discountEngine'
+import { Prisma } from '@hospiflow/database'
 import { Express } from 'express'
 
 let app: Express
@@ -37,7 +38,7 @@ describe('Tax Integration Tests', () => {
   it('calculateTaxes with VAT 16% (exclusive)', async () => {
     const result = await calculateTaxes({
       subtotal: 100.0,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
     })
     expect(result.subtotal).toBe(100.0)
     expect(result.taxableSubtotal).toBe(100.0)
@@ -52,7 +53,7 @@ describe('Tax Integration Tests', () => {
   it('calculateTaxes with VAT inclusive', async () => {
     const result = await calculateTaxes({
       subtotal: 116.0,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
       pricingMode: 'INCLUSIVE',
     })
     expect(result.subtotal).toBe(116.0)
@@ -63,7 +64,7 @@ describe('Tax Integration Tests', () => {
   it('calculateTaxes with zero-tax rate', async () => {
     const result = await calculateTaxes({
       subtotal: 100.0,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'Zero', type: 'VAT', rate: 0, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'Zero', type: 'VAT', rate: new Prisma.Decimal('0'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
     })
     expect(result.totalTax).toBe(0)
     expect(result.grandTotal).toBe(100.0)
@@ -73,8 +74,8 @@ describe('Tax Integration Tests', () => {
     const result = await calculateTaxes({
       subtotal: 100.0,
       taxRules: [
-        { id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] },
-        { id: '2', organizationId: seedData.orgA.organizationId, name: 'Service', type: 'SERVICE_CHARGE', rate: 0.10, isActive: true, applicableTo: [] },
+        { id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() },
+        { id: '2', organizationId: seedData.orgA.organizationId, name: 'Service', type: 'SERVICE_CHARGE', rate: new Prisma.Decimal('0.10'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() },
       ],
     })
     expect(result.totalTax).toBeCloseTo(26.0, 2)
@@ -88,7 +89,7 @@ describe('Tax Integration Tests', () => {
   it('calculateTaxes with rounding precision', async () => {
     const result = await calculateTaxes({
       subtotal: 99.99,
-      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: 0.16, isActive: true, applicableTo: [] }],
+      taxRules: [{ id: '1', organizationId: seedData.orgA.organizationId, name: 'VAT', type: 'VAT', rate: new Prisma.Decimal('0.16'), isActive: true, applicableTo: [], createdAt: new Date(), updatedAt: new Date() }],
     })
     expect(result.totalTax).toBeCloseTo(16.0, 1)
     expect(result.grandTotal).toBeCloseTo(115.99, 2)

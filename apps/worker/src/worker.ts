@@ -1,6 +1,6 @@
+import type { Queue as BullMQQueue, Worker as BullMQWorker } from 'bullmq'
 import { execSync } from 'child_process'
-import { createGunzip, createGzip } from 'zlib'
-import { pipeline } from 'stream/promises'
+import { createGunzip } from 'zlib'
 import { createReadStream, existsSync } from 'fs'
 import { stat, unlink, mkdir, readdir } from 'fs/promises'
 import path from 'path'
@@ -102,7 +102,7 @@ async function applyRetentionPolicy(backupDir: string): Promise<void> {
   cutoff.setDate(cutoff.getDate() - retentionDays)
 
   try {
-    const files = await import('fs/promises').then(fs => fs.readdir(backupDir))
+    const files = await readdir(backupDir)
     const dumpFiles = files.filter(f => f.endsWith('.dump.gz'))
 
     if (dumpFiles.length === 0) return
@@ -156,8 +156,7 @@ async function ensureBackupDir(dir: string): Promise<void> {
 async function runScheduledBackup(): Promise<void> {
   const result = await createBackup()
   if (result.status === 'failed') {
-    console.error('[BACKUP] Scheduled backup failed, exiting')
-    process.exit(1)
+    throw new Error(result.error || 'Scheduled backup failed')
   }
 }
 
@@ -179,33 +178,51 @@ function parseCronToMs(cron: string): number | null {
   return null
 }
 
+async function verifyRedisConnection(redisUrl: string): Promise<void> {
+  const { Redis } = await import('ioredis')
+  const redis = new Redis(redisUrl, {
+    connectTimeout: 5000,
+    maxRetriesPerRequest: 1,
+    retryStrategy: () => null,
+  })
+  redis.on('error', () => undefined)
+
+  try {
+    await redis.ping()
+  } finally {
+    redis.disconnect()
+  }
+}
+
 async function startWorker(): Promise<void> {
   console.log('HOSPIFLOW Worker starting...')
 
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
+  let queue: BullMQQueue | undefined
+  let worker: BullMQWorker | undefined
+
   try {
+    await verifyRedisConnection(redisUrl)
+
     const { Queue, Worker } = await import('bullmq')
-    const { Redis } = await import('ioredis')
+    const connection = {
+      url: redisUrl,
+      connectTimeout: 5000,
+    }
 
-    const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379')
-    const queue = new Queue('backups', { connection: redis })
-
-    await queue.add(
-      'scheduled-backup',
-      {},
-      {
-        repeat: { pattern: BACKUP_SCHEDULE },
-        jobId: 'scheduled-backup',
-      }
-    )
-
-    const worker = new Worker(
+    queue = new Queue('backups', { connection })
+    worker = new Worker(
       'backups',
       async () => {
         console.log('[BACKUP] Running scheduled backup via BullMQ')
         await runScheduledBackup()
       },
-      { connection: redis }
+      { connection }
     )
+
+    worker.on('error', error => {
+      console.error('[BACKUP] BullMQ worker error:', error.message)
+    })
 
     worker.on('completed', job => {
       console.log(`[BACKUP] Job ${job.id} completed`)
@@ -215,18 +232,47 @@ async function startWorker(): Promise<void> {
       console.error(`[BACKUP] Job ${job?.id} failed:`, err.message)
     })
 
+    await queue.add(
+      'scheduled-backup',
+      {},
+      {
+        repeat: { pattern: BACKUP_SCHEDULE },
+        jobId: 'scheduled-backup',
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 60000,
+        },
+      }
+    )
+
+    await worker.waitUntilReady()
+
     console.log(`[BACKUP] Worker started with BullMQ (schedule: ${BACKUP_SCHEDULE})`)
   } catch (error) {
-    console.warn('[BACKUP] BullMQ not available, using setInterval fallback')
+    await worker?.close().catch(() => undefined)
+    await queue?.close().catch(() => undefined)
+
+    console.warn('[BACKUP] BullMQ unavailable, using setInterval fallback')
     const intervalMs = parseCronToMs(BACKUP_SCHEDULE) || 24 * 60 * 60 * 1000
     console.log(`[BACKUP] Fallback interval: ${intervalMs}ms`)
 
-    setTimeout(() => {
-      setInterval(async () => {
-        await runScheduledBackup()
-      }, intervalMs)
-    }, 5000)
+    let backupRunning = false
+    const runFallbackBackup = async () => {
+      if (backupRunning) return
 
+      backupRunning = true
+      try {
+        await runScheduledBackup()
+      } catch (error) {
+        console.error('[BACKUP] Fallback scheduler error:', error instanceof Error ? error.message : String(error))
+      } finally {
+        backupRunning = false
+        setTimeout(runFallbackBackup, intervalMs)
+      }
+    }
+
+    setTimeout(runFallbackBackup, intervalMs)
     console.log('[BACKUP] Worker started with setInterval fallback')
   }
 }
