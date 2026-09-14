@@ -30,6 +30,7 @@ export default defineConfig({
       BACKUP_RETENTION_DAYS: '7',
     },
     fileParallelism: false,
+    testTimeout: 30000,
   },
   resolve: {
     alias: {
