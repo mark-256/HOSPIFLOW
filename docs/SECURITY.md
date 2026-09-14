@@ -71,5 +71,9 @@
 
 ## Known Vulnerabilities
 
-- 20 npm audit vulnerabilities (see B38_DEPENDENCY_AUDIT.md)
-- Should be addressed before production deployment
+- Next.js vulnerabilities remediated in B38.4 (upgraded from 14.2.35 to 16.3.5)
+- 15 remaining npm audit vulnerabilities (see B38.4_SECURITY_HARDENING_REPORT.md)
+  - 2 critical (bcrypt/tar build-time dependency)
+  - 7 high (Prisma transitive, Nodemailer email service)
+  - 6 moderate (test-only, build-only, low-risk runtime)
+- All Next.js SSRF/DoS vulnerabilities RESOLVED
