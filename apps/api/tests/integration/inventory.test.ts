@@ -168,4 +168,53 @@ describe('Inventory Integration Tests', () => {
     const item = await prisma.inventoryItem.findUnique({ where: { id: res.body.data.id } })
     expect(item!.organizationId).toBe(seedData.orgA.organizationId)
   })
+
+  it('duplicate order completion does not duplicate inventory deduction', async () => {
+    const headers = authHeaders(cashierTokens)
+    const prisma = await getPrisma()
+
+    // Create order
+    const orderRes = await request(app)
+      .post('/api/orders')
+      .set(headers)
+      .send({ outletId: seedData.orgA.outletId, orderType: 'DINE_IN' })
+      .expect(201)
+
+    // Add item
+    await request(app)
+      .post(`/api/orders/${orderRes.body.data.id}/items`)
+      .set(headers)
+      .send({ productId: seedData.orgA.productId, quantity: 2 })
+      .expect(201)
+
+    // Complete order through state machine
+    const statuses = ['OPEN', 'SENT_TO_KITCHEN', 'PREPARING', 'READY', 'SERVED', 'COMPLETED']
+    for (const status of statuses) {
+      await request(app)
+        .patch(`/api/orders/${orderRes.body.data.id}/status`)
+        .set(headers)
+        .send({ status })
+        .expect(200)
+    }
+
+    // Get stock movements after first completion
+    const movementsAfterFirst = await prisma.stockMovement.findMany({
+      where: { orderId: orderRes.body.data.id, type: 'SALE' },
+    })
+    const firstDeductionCount = movementsAfterFirst.length
+    expect(firstDeductionCount).toBeGreaterThan(0)
+
+    // Attempt to complete again (should be rejected as invalid transition)
+    await request(app)
+      .patch(`/api/orders/${orderRes.body.data.id}/status`)
+      .set(headers)
+      .send({ status: 'COMPLETED' })
+      .expect(400)
+
+    // Verify no duplicate stock movements created
+    const movementsAfterSecond = await prisma.stockMovement.findMany({
+      where: { orderId: orderRes.body.data.id, type: 'SALE' },
+    })
+    expect(movementsAfterSecond.length).toBe(firstDeductionCount)
+  })
 })

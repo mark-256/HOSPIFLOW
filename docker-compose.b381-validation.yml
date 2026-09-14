@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hospiflow
+      POSTGRES_PASSWORD: hospiflow_prod_test
+      POSTGRES_DB: hospiflow
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hospiflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+  api:
+    image: hospiflow-api:b381
+    ports:
+      - "3101:3001"
+    environment:
+      DATABASE_URL: "postgresql://hospiflow:hospiflow_prod_test@postgres:5432/hospiflow"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "b381-docker-test-secret-key-for-validation-only"
+      JWT_REFRESH_SECRET: "b381-refresh-secret-key-for-validation"
+      JWT_EXPIRY: "15m"
+      JWT_REFRESH_EXPIRY: "7d"
+      NODE_ENV: "development"
+      PORT: "3001"
+      APP_URL: "http://localhost:3101"
+      FRONTEND_URL: "http://localhost:3000"
+      BACKEND_URL: "http://localhost:3101"
+      MPESA_ENVIRONMENT: "sandbox"
+      MPESA_SHORTCODE: "174379"
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      MPESA_CONSUMER_KEY: ""
+      MPESA_CONSUMER_SECRET: ""
+      MPESA_PASSKEY: ""
+      PAYMENT_PROVIDER: "mock"
+      BACKUP_DIR: "/backups"
+      BACKUP_RETENTION_DAYS: "7"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    image: hospiflow-web:b381
+    ports:
+      - "3100:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:3101"
+      NODE_ENV: "production"
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    image: hospiflow-worker:b381
+    environment:
+      DATABASE_URL: "postgresql://hospiflow:hospiflow_prod_test@postgres:5432/hospiflow"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "b381-docker-test-secret-key-for-validation-only"
+      NODE_ENV: "development"
+      BACKUP_DIR: "/backups"
+      BACKUP_RETENTION_DAYS: "7"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pg_data:
+  redis_data:

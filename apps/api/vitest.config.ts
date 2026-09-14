@@ -6,8 +6,8 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     env: {
-      DATABASE_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5433/hospiflow_test',
-      DATABASE_TEST_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5433/hospiflow_test',
+      DATABASE_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
+      DATABASE_TEST_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
       NODE_ENV: 'test',
       PAYMENT_PROVIDER: 'mock',
       JWT_SECRET: 'test-jwt-secret-key-for-integration-tests-only',

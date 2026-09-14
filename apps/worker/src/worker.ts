@@ -281,3 +281,8 @@ startWorker().catch(error => {
   console.error('Worker failed to start:', error)
   process.exit(1)
 })
+
+process.on('SIGTERM', () => {
+  console.log('Worker shutting down gracefully...')
+  process.exit(0)
+})

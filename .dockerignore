@@ -1,0 +1,13 @@
+node_modules
+dist
+.next
+.git
+.gitignore
+Dockerfile*
+docker-compose*.yml
+**/.env
+**/.env.*
+*.env
+test-results
+playwright-report
+coverage

@@ -1,15 +1,21 @@
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
 COPY packages/database/package.json packages/database/
-RUN npm ci --workspaces
+COPY packages/types/package.json packages/types/
+COPY packages/config/package.json packages/config/
+COPY packages/ui/package.json packages/ui/
+RUN npm ci --workspaces --ignore-scripts && npm rebuild
 COPY . .
+RUN npm run db:generate --workspace=@hospiflow/database
 RUN npm run build --workspace=@hospiflow/database
 RUN npm run build --workspace=@hospiflow/api
 
-FROM node:20-alpine
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+FROM node:20-slim
+RUN groupadd -g 1001 -r nodejs && useradd -u 1001 -r -g nodejs -s /bin/sh -m nodejs
 WORKDIR /app
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist
@@ -17,4 +23,4 @@ COPY --from=builder --chown=nodejs:nodejs /app/packages/database ./packages/data
 COPY --from=builder --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
 USER nodejs
 EXPOSE 3001
-CMD ["node", "apps/api/dist/server.js"]
+CMD ["node", "apps/api/dist/src/server.js"]

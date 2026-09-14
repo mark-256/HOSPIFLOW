@@ -1,4 +1,4 @@
-const TEST_DB_URL = 'postgresql://hospiflow:hospiflow_dev@localhost:5433/hospiflow_test'
+const TEST_DB_URL = 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow'
 
 export { TEST_DB_URL }
 
