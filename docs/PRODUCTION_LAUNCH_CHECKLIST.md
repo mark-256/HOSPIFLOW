@@ -1,6 +1,23 @@
 # Production Launch Checklist — HOSPIFLOW
 
+Status values: `IMPLEMENTED`, `TESTED LOCALLY`, `VERIFIED IN TEST ENVIRONMENT`, `VERIFIED IN SANDBOX`, `VERIFIED IN PRODUCTION`, `NOT VERIFIED`, `NOT APPLICABLE`.
+
 ## PRE-DEPLOYMENT
+
+- [ ] Git release identified — **IMPLEMENTED** (B38.5 gate commit `756e256`)
+- [ ] Working tree reviewed — **IMPLEMENTED** (baseline was clean; review final diff before release)
+- [ ] Dependency audit reviewed — **IMPLEMENTED** (15 findings classified; 0 production blockers)
+- [ ] No production blocker vulnerabilities — **IMPLEMENTED**
+- [ ] Required environment variables configured — **NOT VERIFIED** (local `.env` and process environment are absent)
+- [ ] Secrets stored securely — **NOT VERIFIED** (runtime secret store/production platform not inspected)
+- [ ] Payment provider selected — **NOT VERIFIED** (set `PAYMENT_PROVIDER=MPESA` or `STRIPE`)
+- [ ] Mock payments disabled — **IMPLEMENTED** (production mock startup fails closed)
+- [ ] Database backup available — **NOT VERIFIED** (validation backup/restore passed; production destination not verified)
+- [ ] Migration status reviewed — **NOT VERIFIED** (no production `DATABASE_URL` available)
+- [ ] Production-safe bootstrap confirmed — **IMPLEMENTED** (no production bootstrap required; development seed is prohibited)
+- [ ] Docker images built — **TESTED LOCALLY** (API, Web, Worker production images built)
+- [ ] Image security checked — **TESTED LOCALLY** (non-root users; no `.env` or secret-bearing history)
+- [ ] Rollback release identified — **NOT VERIFIED** (record production image tags/configuration before launch)
 
 ### Environment Variables
 - [ ] NODE_ENV set to `production`
@@ -50,7 +67,7 @@
 - [ ] Backup directory configured and writable
 - [ ] Backup schedule configured (default: daily 02:00)
 - [ ] Backup retention configured (default: 7 days)
-- [ ] Backup executed and verified (B38: VERIFIED)
+- [ ] Backup executed and verified (B38: VERIFIED IN VALIDATION ENVIRONMENT)
 
 ### Monitoring
 - [ ] Health check endpoint accessible: `/health`
@@ -78,6 +95,15 @@
 ---
 
 ## DEPLOYMENT
+
+- [ ] Deploy database migrations — **NOT VERIFIED** (run `docker-compose -f docker-compose.production.yml run --rm api npm run db:migrate`)
+- [ ] Verify migration success — **NOT VERIFIED**
+- [ ] Deploy API — **NOT VERIFIED**
+- [ ] Deploy Web — **NOT VERIFIED**
+- [ ] Deploy Worker — **NOT VERIFIED**
+- [ ] Verify Redis — **NOT VERIFIED**
+- [ ] Verify database connectivity — **NOT VERIFIED**
+- [ ] Verify health endpoints — **TESTED LOCALLY** (Compose health checks are defined; production endpoints not exercised)
 
 ### Migration
 - [ ] `npx prisma migrate deploy` executed successfully
@@ -120,6 +146,20 @@
 ---
 
 ## POST-DEPLOYMENT
+
+- [ ] Login — **NOT VERIFIED**
+- [ ] Authentication — **NOT VERIFIED**
+- [ ] Dashboard — **NOT VERIFIED**
+- [ ] Guest lookup — **NOT VERIFIED**
+- [ ] Reservation lookup — **NOT VERIFIED**
+- [ ] Order lookup — **NOT VERIFIED**
+- [ ] Folio lookup — **NOT VERIFIED**
+- [ ] RBAC — **NOT VERIFIED**
+- [ ] Tenant isolation — **NOT VERIFIED**
+- [ ] Payment configuration — **NOT VERIFIED**
+- [ ] Audit logging — **NOT VERIFIED**
+- [ ] Worker processing — **NOT VERIFIED**
+- [ ] Error monitoring — **NOT VERIFIED**
 
 ### Login
 - [ ] Login with valid credentials: PASS
@@ -179,6 +219,17 @@
 
 ## ROLLBACK
 
+- [ ] Stop rollout — **IMPLEMENTED** (procedure documented)
+- [ ] Preserve logs — **IMPLEMENTED** (procedure documented)
+- [ ] Select previous release — **NOT VERIFIED**
+- [ ] Restore application image — **IMPLEMENTED** (procedure documented)
+- [ ] Verify schema compatibility — **IMPLEMENTED** (procedure requires compatibility check)
+- [ ] Restore database if required — **IMPLEMENTED** (backup restore/forward fix documented)
+- [ ] Restart services — **IMPLEMENTED** (procedure documented)
+- [ ] Run smoke tests — **IMPLEMENTED** (procedure documented)
+- [ ] Confirm service health — **IMPLEMENTED** (procedure documented)
+- [ ] Confirm critical workflows — **IMPLEMENTED** (procedure documented)
+
 ### Application Rollback
 - [ ] Previous Docker image tag available
 - [ ] Rollback command documented:
@@ -208,3 +259,7 @@
   docker-compose -f docker-compose.production.yml down
   ```
 - [ ] Graceful shutdown tested (SIGTERM/SIGINT handlers in server.ts and worker.ts)
+
+## Seed Safety
+
+`npm run db:seed` is development-only and creates demo organizations, users, rooms, reservations, orders, and financial records. **DO NOT RUN IN PRODUCTION.** No production bootstrap is required beyond migrations and an explicitly approved, idempotent administrative bootstrap if one is introduced later.
