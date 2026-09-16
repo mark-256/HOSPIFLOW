@@ -16,6 +16,9 @@ RUN npm run build --workspace=@hospiflow/api
 
 FROM node:20-slim
 RUN groupadd -g 1001 -r nodejs && useradd -u 1001 -r -g nodejs -s /bin/sh -m nodejs
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 ca-certificates libpq5 gzip && rm -rf /var/lib/apt/lists/*
+COPY --from=postgres:16-bookworm /usr/lib/postgresql/16/bin/pg_dump /usr/local/bin/pg_dump
+COPY --from=postgres:16-bookworm /usr/lib/postgresql/16/bin/psql /usr/local/bin/psql
 WORKDIR /app
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist

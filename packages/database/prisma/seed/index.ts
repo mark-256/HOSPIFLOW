@@ -43,12 +43,47 @@ async function main() {
 
   const role = await prisma.appRole.upsert({
     where: { organizationId_name: { organizationId: org.id, name: 'ORG_ADMIN' } },
-    update: {},
+    update: {
+      permissions: [
+        'orders_create', 'orders_view', 'orders_edit', 'orders_cancel', 'orders_discount',
+        'payments_process', 'payments_refund',
+        'inventory_view', 'inventory_adjust',
+        'reports_view',
+        'users_manage',
+        'reservations_create', 'reservations_edit', 'reservations_cancel',
+        'guests_view', 'guests_edit',
+        'folios_view', 'folios_edit',
+        'rooms_view', 'rooms_edit',
+        'housekeeping_view', 'housekeeping_edit',
+        'maintenance_view', 'maintenance_edit',
+        'finance_view', 'finance_edit',
+        'procurement_view', 'procurement_edit',
+        'menu_manage',
+        'shifts_view', 'shifts_manage',
+      ],
+    },
     create: {
       organizationId: org.id,
       name: 'ORG_ADMIN',
       description: 'Organization Admin',
       isSystem: true,
+      permissions: [
+        'orders_create', 'orders_view', 'orders_edit', 'orders_cancel', 'orders_discount',
+        'payments_process', 'payments_refund',
+        'inventory_view', 'inventory_adjust',
+        'reports_view',
+        'users_manage',
+        'reservations_create', 'reservations_edit', 'reservations_cancel',
+        'guests_view', 'guests_edit',
+        'folios_view', 'folios_edit',
+        'rooms_view', 'rooms_edit',
+        'housekeeping_view', 'housekeeping_edit',
+        'maintenance_view', 'maintenance_edit',
+        'finance_view', 'finance_edit',
+        'procurement_view', 'procurement_edit',
+        'menu_manage',
+        'shifts_view', 'shifts_manage',
+      ],
     },
   })
 
