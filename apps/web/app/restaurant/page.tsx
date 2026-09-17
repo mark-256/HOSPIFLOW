@@ -1,12 +1,12 @@
 'use client'
 
-export default function Page() {
+import ModuleShell from '@/components/ModuleShell'
+import OutletOrders from '@/components/OutletOrders'
+
+export default function RestaurantPage() {
   return (
-    <div className="min-h-screen bg-hospiflow-50 p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-hospiflow-900 capitalize">restaurant</h1>
-        <p className="mt-2 text-hospiflow-600">This module is under development.</p>
-      </div>
-    </div>
+    <ModuleShell title="Restaurant" description="Take and manage restaurant orders">
+      <OutletOrders title="Restaurant orders" orderType="DINE_IN" outletType="RESTAURANT" />
+    </ModuleShell>
   )
 }

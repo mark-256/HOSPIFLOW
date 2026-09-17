@@ -1,51 +1,72 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import ModuleShell from '@/components/ModuleShell'
+import { apiRequest, getErrorMessage, responseData } from '@/lib/api'
 
 export default function LoyaltyPage() {
+  const [guests, setGuests] = useState<any[]>([])
   const [guestId, setGuestId] = useState('')
   const [account, setAccount] = useState<any>(null)
-  const [points, setPoints] = useState(0)
+  const [points, setPoints] = useState('')
   const [reason, setReason] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : ''
+  const loadGuests = useCallback(async () => {
+    try {
+      const response = await apiRequest<any[]>('/api/guests?limit=200')
+      setGuests(responseData(response))
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to load guests'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const fetchAccount = async () => {
-    if (!guestId) return
-    const res = await fetch(`/api/loyalty/account?guestId=${guestId}`, { headers: { Authorization: `Bearer ${token}` } })
-    const json = await res.json()
-    if (json.success) setAccount(json.data)
-  }
+  const loadAccount = useCallback(async (selectedGuestId: string) => {
+    setAccount(null)
+    if (!selectedGuestId) return
+    try {
+      const response = await apiRequest<any>(`/api/loyalty/account?guestId=${encodeURIComponent(selectedGuestId)}`)
+      setAccount(response.data)
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'No loyalty account found for this guest'))
+    }
+  }, [])
 
-  useEffect(() => { fetchAccount() }, [guestId])
+  useEffect(() => { void loadGuests() }, [loadGuests])
+  useEffect(() => { void loadAccount(guestId) }, [guestId, loadAccount])
 
   const addPoints = async () => {
-    await fetch('/api/loyalty/points', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ guestId, points, reason }) })
-    setPoints(0); setReason(''); fetchAccount()
+    if (!guestId || !points) return
+    setSaving(true)
+    setError('')
+    try {
+      await apiRequest('/api/loyalty/points', { method: 'POST', body: JSON.stringify({ guestId, points: Number(points), reason }) })
+      setPoints('')
+      setReason('')
+      setNotice('Points added successfully.')
+      await loadAccount(guestId)
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to add points'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-hospiflow-50 p-8">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-3xl font-bold text-hospiflow-900 mb-6">Loyalty</h1>
-        <div className="bg-white p-6 rounded-lg shadow mb-6">
-          <label className="block text-sm font-medium text-hospiflow-700 mb-2">Guest ID</label>
-          <input className="border rounded p-2 w-full" value={guestId} onChange={e => setGuestId(e.target.value)} />
+    <ModuleShell title="Loyalty" description="Reward guests and track loyalty tiers">
+      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
+      {notice && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">{notice}</div>}
+      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading loyalty workspace...</div> : (
+        <div className="max-w-3xl space-y-6">
+          <section className="rounded-lg border border-hospiflow-200 bg-white p-5"><label className="block text-sm font-medium text-hospiflow-700">Guest</label><select className="mt-2 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={guestId} onChange={(event) => setGuestId(event.target.value)}><option value="">Select guest</option>{guests.map((guest) => <option key={guest.id} value={guest.id}>{guest.firstName} {guest.lastName} · {guest.email || guest.phone || 'No contact'}</option>)}</select></section>
+          {account ? <section className="rounded-lg border border-hospiflow-200 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-hospiflow-600">Points balance</p><p className="text-4xl font-bold">{account.points}</p></div><span className="rounded bg-primary-100 px-3 py-1 text-sm font-medium text-primary-800">{account.tier || 'BRONZE'}</span></div><p className="mt-3 text-sm text-hospiflow-600">Lifetime points: {account.lifetimePoints || 0}</p><div className="mt-5 grid gap-3 sm:grid-cols-3"><input type="number" min="1" placeholder="Points" className="rounded-md border border-hospiflow-300 px-3 py-2" value={points} onChange={(event) => setPoints(event.target.value)} /><input placeholder="Reason" className="rounded-md border border-hospiflow-300 px-3 py-2 sm:col-span-2" value={reason} onChange={(event) => setReason(event.target.value)} /><button disabled={saving || !points} onClick={() => void addPoints()} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50">{saving ? 'Saving...' : 'Add points'}</button></div></section> : guestId && <section className="rounded-lg border border-dashed border-hospiflow-300 bg-white p-8 text-center text-hospiflow-600">This guest does not have a loyalty account yet. Add points to create one.</section>}
         </div>
-        {account && (
-          <div className="bg-white p-6 rounded-lg shadow mb-6">
-            <p className="text-sm text-hospiflow-600">Points Balance</p>
-            <p className="text-3xl font-bold text-hospiflow-900">{account.points}</p>
-            <p className="text-sm text-hospiflow-600 mt-2">Lifetime Points: {account.lifetimePoints}</p>
-            <p className="text-sm text-hospiflow-600">Tier: {account.tier}</p>
-            <div className="mt-4 flex space-x-2">
-              <input className="border rounded p-2" type="number" placeholder="Points" value={points} onChange={e => setPoints(parseInt(e.target.value))} />
-              <input className="border rounded p-2" placeholder="Reason" value={reason} onChange={e => setReason(e.target.value)} />
-              <button onClick={addPoints} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Add</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </ModuleShell>
   )
 }

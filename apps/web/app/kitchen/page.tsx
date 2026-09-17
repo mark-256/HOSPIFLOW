@@ -1,54 +1,48 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import ModuleShell from '@/components/ModuleShell'
+import { apiRequest, getErrorMessage, responseData } from '@/lib/api'
 
 export default function KitchenPage() {
-  const [orders, setOrders] = useState([])
+  const [orders, setOrders] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : ''
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      const response = await apiRequest<any[]>('/api/orders?limit=100')
+      setOrders(responseData(response).filter((order) => ['SENT_TO_KITCHEN', 'PREPARING', 'READY'].includes(order.status)))
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to load kitchen orders'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const fetchOrders = async () => {
-    const res = await fetch('/api/orders', { headers: { Authorization: `Bearer ${token}` } })
-    const json = await res.json()
-    if (json.success) setOrders(json.data.filter((o: any) => ['SENT_TO_KITCHEN', 'PREPARING', 'READY'].includes(o.status)))
-  }
-
-  useEffect(() => { fetchOrders(); const interval = setInterval(fetchOrders, 5000); return () => clearInterval(interval) }, [])
+  useEffect(() => {
+    void load()
+    const interval = window.setInterval(() => void load(), 5000)
+    return () => window.clearInterval(interval)
+  }, [load])
 
   const updateStatus = async (orderId: string, status: string) => {
-    await fetch(`/api/orders/${orderId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ status }) })
-    fetchOrders()
+    setError('')
+    try {
+      await apiRequest(`/api/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })
+      await load()
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to update kitchen order'))
+    }
   }
 
   return (
-    <div className="min-h-screen bg-hospiflow-900 text-white p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Kitchen Display</h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {orders.map((order: any) => (
-            <div key={order.id} className="bg-hospiflow-800 p-4 rounded-lg">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold">{order.orderNumber}</h3>
-                <span className="text-xs bg-primary-600 px-2 py-1 rounded">{order.status}</span>
-              </div>
-              <div className="space-y-2 mb-4">
-                {order.items.map((item: any) => (
-                  <div key={item.id} className="border-b border-hospiflow-700 pb-2">
-                    <p className="font-medium">{item.productName} x{item.quantity}</p>
-                    {item.notes && <p className="text-xs text-hospiflow-400">{item.notes}</p>}
-                  </div>
-                ))}
-              </div>
-              <div className="flex space-x-2">
-                {order.status === 'SENT_TO_KITCHEN' && <button onClick={() => updateStatus(order.id, 'PREPARING')} className="flex-1 bg-yellow-600 text-white py-2 rounded hover:bg-yellow-700">Start</button>}
-                {order.status === 'PREPARING' && <button onClick={() => updateStatus(order.id, 'READY')} className="flex-1 bg-green-600 text-white py-2 rounded hover:bg-green-700">Ready</button>}
-                {order.status === 'READY' && <button onClick={() => updateStatus(order.id, 'SERVED')} className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Served</button>}
-              </div>
-            </div>
-          ))}
-        </div>
-        {orders.length === 0 && <p className="text-center text-hospiflow-400 mt-10">No active kitchen orders</p>}
-      </div>
-    </div>
+    <ModuleShell title="Kitchen" description="Kitchen display for preparing and serving orders">
+      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
+      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading kitchen orders...</div> : orders.length === 0 ? <div className="rounded-lg border border-hospiflow-200 bg-white p-10 text-center text-hospiflow-600">No active kitchen orders</div> : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{orders.map((order) => <section key={order.id} className="rounded-lg border border-hospiflow-200 bg-white p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-lg font-semibold">{order.orderNumber}</p><p className="text-xs text-hospiflow-600">{order.table?.name || 'Walk-in'} · {order.orderType}</p></div><span className="rounded bg-primary-100 px-2 py-1 text-xs text-primary-800">{order.status}</span></div><div className="mt-4 space-y-2">{order.items?.map((item: any) => <div key={item.id} className="flex justify-between gap-3 border-b border-hospiflow-200 pb-2"><span className="text-sm">{item.productName}</span><span className="text-sm font-medium">x{item.quantity}</span></div>)}</div><div className="mt-5 flex gap-2">{order.status === 'SENT_TO_KITCHEN' && <button onClick={() => void updateStatus(order.id, 'PREPARING')} className="flex-1 rounded bg-yellow-600 px-3 py-2 text-sm font-medium text-white">Start preparation</button>}{order.status === 'PREPARING' && <button onClick={() => void updateStatus(order.id, 'READY')} className="flex-1 rounded bg-green-600 px-3 py-2 text-sm font-medium text-white">Mark ready</button>}{order.status === 'READY' && <button onClick={() => void updateStatus(order.id, 'SERVED')} className="flex-1 rounded bg-primary-600 px-3 py-2 text-sm font-medium text-white">Mark served</button>}</div></section>)}</div>
+      )}
+    </ModuleShell>
   )
 }

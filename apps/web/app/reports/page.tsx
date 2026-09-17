@@ -1,54 +1,37 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import ModuleShell from '@/components/ModuleShell'
+import { apiRequest, getErrorMessage } from '@/lib/api'
 
 export default function ReportsPage() {
   const [sales, setSales] = useState<any>(null)
   const [occupancy, setOccupancy] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : ''
-
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/reports/sales', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-      fetch('/api/reports/occupancy', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-    ]).then(([salesJson, occJson]) => {
-      if (salesJson.success) setSales(salesJson.data)
-      if (occJson.success) setOccupancy(occJson.data)
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [salesResponse, occupancyResponse] = await Promise.all([apiRequest<any>('/api/reports/sales?limit=100'), apiRequest<any>('/api/reports/occupancy')])
+      setSales(salesResponse.data)
+      setOccupancy(occupancyResponse.data)
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to load reports'))
+    } finally {
       setLoading(false)
-    })
+    }
   }, [])
 
-  if (loading) return <div className="min-h-screen bg-hospiflow-50 flex items-center justify-center">Loading...</div>
+  useEffect(() => { void load() }, [load])
 
   return (
-    <div className="min-h-screen bg-hospiflow-50 p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-hospiflow-900 mb-6">Reports</h1>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-lg shadow">
-            <p className="text-sm text-hospiflow-600">Total Sales</p>
-            <p className="text-2xl font-bold text-hospiflow-900">KES {sales?.totalSales?.toFixed(2) || '0.00'}</p>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
-            <p className="text-sm text-hospiflow-600">Total Orders</p>
-            <p className="text-2xl font-bold text-hospiflow-900">{sales?.totalOrders || 0}</p>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
-            <p className="text-sm text-hospiflow-600">Avg Order Value</p>
-            <p className="text-2xl font-bold text-hospiflow-900">KES {sales?.avgOrderValue?.toFixed(2) || '0.00'}</p>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
-            <p className="text-sm text-hospiflow-600">Occupancy Rate</p>
-            <p className="text-2xl font-bold text-hospiflow-900">{occupancy?.occupancyRate || 0}%</p>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
-            <p className="text-sm text-hospiflow-600">Rooms Occupied</p>
-            <p className="text-2xl font-bold text-hospiflow-900">{occupancy?.occupied || 0} / {occupancy?.total || 0}</p>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ModuleShell title="Reports" description="Sales, order, and occupancy performance">
+      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
+      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading reports...</div> : (
+        <div className="space-y-6"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div className="rounded-lg border border-hospiflow-200 bg-white p-5"><p className="text-sm text-hospiflow-600">Total sales</p><p className="mt-2 text-2xl font-bold">KES {Number(sales?.totalSales || 0).toFixed(2)}</p></div><div className="rounded-lg border border-hospiflow-200 bg-white p-5"><p className="text-sm text-hospiflow-600">Total orders</p><p className="mt-2 text-2xl font-bold">{sales?.totalOrders || 0}</p></div><div className="rounded-lg border border-hospiflow-200 bg-white p-5"><p className="text-sm text-hospiflow-600">Average order value</p><p className="mt-2 text-2xl font-bold">KES {Number(sales?.avgOrderValue || 0).toFixed(2)}</p></div><div className="rounded-lg border border-hospiflow-200 bg-white p-5"><p className="text-sm text-hospiflow-600">Occupancy rate</p><p className="mt-2 text-2xl font-bold">{Number(occupancy?.occupancyRate || 0).toFixed(1)}%</p></div></div><section className="rounded-lg border border-hospiflow-200 bg-white p-5"><h2 className="text-lg font-semibold">Occupancy</h2><p className="mt-2 text-hospiflow-700">{occupancy?.occupied || 0} of {occupancy?.total || 0} rooms occupied for the selected date.</p><div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-hospiflow-100"><div className="h-full bg-primary-600" style={{ width: `${Math.min(100, Number(occupancy?.occupancyRate || 0))}%` }} /></div></section></div>
+      )}
+    </ModuleShell>
   )
 }

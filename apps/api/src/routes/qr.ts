@@ -4,7 +4,7 @@ import { qrController } from '../controllers/qrController'
 import { asyncHandler } from '../utils/asyncHandler'
 
 const router = Router()
-router.use(authMiddleware)
-router.post('/generate', asyncHandler(qrController.generate))
+router.post('/generate', authMiddleware, asyncHandler(qrController.generate))
 router.get('/lookup/:token', asyncHandler(qrController.lookup))
+router.post('/orders', asyncHandler(qrController.createOrder))
 export default router

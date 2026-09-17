@@ -60,10 +60,14 @@ Status values: `VERIFIED IN PRODUCTION`, `PASS`, `FAIL`, `NOT VERIFIED`, `NOT AP
 
 ### Payments
 - [x] Stripe credentials configured — PASS (keys present, but TEST not LIVE)
-- [x] Stripe fail-closed verified — PASS (4 scenarios tested)
+- [x] Stripe fail-closed verified — PASS (4 scenarios tested, B38.7)
 - [x] Payment provider factory initializes without error — PASS (STRIPE)
+- [x] Stripe webhook signature verification — PASS (tested with valid/invalid signatures, B38.7)
+- [x] Payment idempotency — PASS (integration tests 9/9 passing, B38.7)
+- [x] Refund implementation exists — PASS (full/partial, folio correction, audit, B38.7)
 - [ ] Real transaction verification — **NOT VERIFIED** (test keys cannot process real payments)
-- [ ] Webhook verification in production — **NOT VERIFIED** (no live webhook endpoint registered)
+- [ ] Webhook verification in production — **NOT VERIFIED** (no live webhook endpoint registered with Stripe Dashboard)
+- [ ] Refund live verification — **NOT VERIFIED** (requires live Stripe credentials)
 
 ### Backup
 - [x] Backup directory configured and writable — PASS (`/backups`, host `./backups/`)
@@ -210,6 +214,41 @@ Status values: `VERIFIED IN PRODUCTION`, `PASS`, `FAIL`, `NOT VERIFIED`, `NOT AP
 - [ ] KDS E2E: NOT EXECUTED
 - [ ] Inventory E2E: NOT EXECUTED
 - [ ] Security E2E: NOT EXECUTED
+
+---
+
+## B38.7 — FINAL PAYMENT ACTIVATION & RELEASE GATE
+
+Status: **CONDITIONAL GO** — Application and infrastructure production-ready; LIVE Stripe credentials not yet configured.
+
+### B38.7 Verification Results
+
+- [x] StripeProvider implementation inspected — PASS
+- [x] Webhook signature verification tested — PASS
+- [x] Payment idempotency verified — PASS (9/9 integration tests)
+- [x] Refund implementation inspected — PASS
+- [x] Fail-closed behavior verified (4 scenarios) — PASS
+- [x] Secret leak check (sk_live_, sk_test_, whsec_) — PASS
+- [x] Production smoke tests re-run — PASS (login, auth, tenant isolation, reservations, orders, folios, payments, health, worker, Redis, DB)
+- [x] Docker deployment regression — PASS (all 5 services healthy)
+- [x] Dependency vulnerabilities reclassified — PASS (0 production blockers)
+- [x] Backup/restore/rollback unaffected by Stripe config — PASS
+- [x] HTTPS/TLS architecture confirmed (reverse proxy termination) — PASS
+- [ ] LIVE Stripe credentials configured — PENDING (deployment owner action required)
+- [ ] LIVE payment transaction verified — PENDING (requires live credentials + authorization)
+- [ ] Production webhook registered with Stripe Dashboard — PENDING
+- [ ] Refund live verification — PENDING
+- [ ] Browser E2E — NOT EXECUTED (no test specs)
+
+### Required for GO Verdict
+
+1. Provision live Stripe keys (sk_live_..., pk_live_..., whsec_live_...) from Stripe Dashboard
+2. Update production .env with live values
+3. Register webhook endpoint in Stripe Dashboard: `https://<domain>/api/payments/webhook/stripe`
+4. Deploy: `docker compose -f docker-compose.production.yml up -d`
+5. Perform authorized controlled live transaction (minimum amount, test card in live mode)
+6. Verify refund flow (if authorized)
+7. Re-run production smoke tests
 
 ---
 

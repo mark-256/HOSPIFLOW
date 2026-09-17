@@ -1,28 +1,14 @@
 import { Router } from 'express'
+import { purchaseOrdersController } from '../controllers/purchaseOrdersController'
 import { authMiddleware } from '../middleware/auth'
+import { asyncHandler } from '../utils/asyncHandler'
 
 const router = Router()
-
 router.use(authMiddleware)
-
-router.get('/', (_req, res) => {
-  res.json({ success: true, data: [] })
-})
-
-router.post('/', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
-
-router.get('/:id', (_req, res) => {
-  res.json({ success: true, data: {} })
-})
-
-router.patch('/:id', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
-
-router.delete('/:id', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
+router.get('/', asyncHandler(purchaseOrdersController.list))
+router.post('/', asyncHandler(purchaseOrdersController.create))
+router.get('/:id', asyncHandler(purchaseOrdersController.get))
+router.patch('/:id', asyncHandler(purchaseOrdersController.update))
+router.delete('/:id', asyncHandler(purchaseOrdersController.remove))
 
 export default router

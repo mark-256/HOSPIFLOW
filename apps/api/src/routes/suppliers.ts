@@ -1,28 +1,14 @@
 import { Router } from 'express'
+import { suppliersController } from '../controllers/suppliersController'
 import { authMiddleware } from '../middleware/auth'
+import { asyncHandler } from '../utils/asyncHandler'
 
 const router = Router()
-
 router.use(authMiddleware)
-
-router.get('/', (_req, res) => {
-  res.json({ success: true, data: [] })
-})
-
-router.post('/', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
-
-router.get('/:id', (_req, res) => {
-  res.json({ success: true, data: {} })
-})
-
-router.patch('/:id', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
-
-router.delete('/:id', (_req, res) => {
-  res.status(501).json({ success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not implemented' } })
-})
+router.get('/', asyncHandler(suppliersController.list))
+router.post('/', asyncHandler(suppliersController.create))
+router.get('/:id', asyncHandler(suppliersController.get))
+router.patch('/:id', asyncHandler(suppliersController.update))
+router.delete('/:id', asyncHandler(suppliersController.remove))
 
 export default router

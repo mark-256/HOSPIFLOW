@@ -1,98 +1,76 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import ModuleShell from '@/components/ModuleShell'
+import { apiRequest } from '@/lib/api'
+
+type User = {
+  firstName?: string
+  lastName?: string
+  email?: string
+  role?: string
+}
+
+const menuItems = [
+  { href: '/hotel', label: 'Hotel', description: 'Properties, rooms, guests, and stays' },
+  { href: '/reservations', label: 'Reservations', description: 'Bookings and arrival workflow' },
+  { href: '/rooms', label: 'Rooms', description: 'Room inventory and status' },
+  { href: '/guests', label: 'Guests', description: 'Guest profiles and preferences' },
+  { href: '/pos', label: 'POS', description: 'Tables, menus, and orders' },
+  { href: '/restaurant', label: 'Restaurant', description: 'Restaurant ordering workspace' },
+  { href: '/bar', label: 'Bar', description: 'Bar ordering workspace' },
+  { href: '/kitchen', label: 'Kitchen', description: 'Kitchen display and fulfillment' },
+  { href: '/inventory', label: 'Inventory', description: 'Stock items and movements' },
+  { href: '/procurement', label: 'Procurement', description: 'Suppliers and purchase orders' },
+  { href: '/housekeeping', label: 'Housekeeping', description: 'Room service tasks' },
+  { href: '/maintenance', label: 'Maintenance', description: 'Repairs and tickets' },
+  { href: '/online-ordering', label: 'Online Orders', description: 'Delivery and pickup orders' },
+  { href: '/qr-order', label: 'QR Ordering', description: 'Guest self-ordering' },
+  { href: '/loyalty', label: 'Loyalty', description: 'Points and guest rewards' },
+  { href: '/guest-portal', label: 'Guest Portal', description: 'Guest reservations and folios' },
+  { href: '/reports', label: 'Reports', description: 'Sales and occupancy analytics' },
+  { href: '/finance', label: 'Finance', description: 'Folios, payments, and balances' },
+  { href: '/settings', label: 'Settings', description: 'Organization and access setup' },
+  { href: '/ai', label: 'AI Assistant', description: 'Operational insights and actions' },
+]
 
 export default function DashboardPage() {
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
+    const token = window.localStorage.getItem('token')
     if (!token) {
-      router.push('/login')
+      router.replace('/login')
       return
     }
-    fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('Not authenticated')
-        return res.json()
+    apiRequest<User>('/api/auth/me')
+      .then((response) => setUser(response.data))
+      .catch(() => {
+        window.localStorage.removeItem('token')
+        router.replace('/login')
       })
-      .then((data) => setUser(data.data))
-      .catch(() => router.push('/login'))
   }, [router])
 
-  if (!user) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>
-  }
-
-  const menuItems = [
-    { href: '/pos', label: 'POS', icon: '💳' },
-    { href: '/hotel', label: 'Hotel', icon: '🏨' },
-    { href: '/reservations', label: 'Reservations', icon: '📅' },
-    { href: '/rooms', label: 'Rooms', icon: '🚪' },
-    { href: '/guests', label: 'Guests', icon: '👥' },
-    { href: '/restaurant', label: 'Restaurant', icon: '🍽️' },
-    { href: '/kitchen', label: 'Kitchen', icon: '👨‍🍳' },
-    { href: '/bar', label: 'Bar', icon: '🍸' },
-    { href: '/inventory', label: 'Inventory', icon: '📦' },
-    { href: '/housekeeping', label: 'Housekeeping', icon: '🧹' },
-    { href: '/maintenance', label: 'Maintenance', icon: '🔧' },
-    { href: '/online-ordering', label: 'Online Orders', icon: '🛒' },
-    { href: '/loyalty', label: 'Loyalty', icon: '🎁' },
-    { href: '/guest-portal', label: 'Guest Portal', icon: '🌐' },
-    { href: '/reports', label: 'Reports', icon: '📊' },
-    { href: '/finance', label: 'Finance', icon: '💰' },
-    { href: '/settings', label: 'Settings', icon: '⚙️' },
-  ]
+  if (!user) return <ModuleShell title="Dashboard"><div className="flex min-h-[300px] items-center justify-center text-hospiflow-600">Loading dashboard...</div></ModuleShell>
 
   return (
-    <div className="min-h-screen bg-hospiflow-50">
-      <nav className="bg-white shadow-sm border-b border-hospiflow-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-bold text-hospiflow-900">HOSPIFLOW</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-hospiflow-600">
-                {user.firstName} {user.lastName}
-              </span>
-              <button
-                onClick={() => {
-                  localStorage.removeItem('token')
-                  router.push('/login')
-                }}
-                className="text-sm text-hospiflow-600 hover:text-hospiflow-900"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <h2 className="text-2xl font-bold text-hospiflow-900 mb-6">Dashboard</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {menuItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow"
-              >
-                <div className="p-6">
-                  <div className="text-3xl mb-2">{item.icon}</div>
-                  <div className="text-lg font-medium text-hospiflow-900">{item.label}</div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </main>
-    </div>
+    <ModuleShell title="Dashboard" description={`Welcome back, ${user.firstName || 'User'}`}>
+      <div className="mb-6 rounded-lg border border-primary-100 bg-primary-50 p-5">
+        <h2 className="text-lg font-semibold text-hospiflow-900">Operations overview</h2>
+        <p className="mt-1 text-sm text-hospiflow-700">Use the modules below to manage the property, food and beverage, stock, guests, and finance workflows.</p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {menuItems.map((item) => (
+          <Link key={item.href} href={item.href} className="rounded-lg border border-hospiflow-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+            <h3 className="text-lg font-semibold text-hospiflow-900">{item.label}</h3>
+            <p className="mt-1 text-sm text-hospiflow-600">{item.description}</p>
+            <p className="mt-4 text-sm font-medium text-primary-700">Open module →</p>
+          </Link>
+        ))}
+      </div>
+    </ModuleShell>
   )
 }
