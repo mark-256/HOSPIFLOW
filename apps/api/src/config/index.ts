@@ -27,7 +27,7 @@ export const config = {
   uploadDir: process.env.UPLOAD_DIR || './uploads',
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10),
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-  rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+  rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'development' ? '1000' : '100'), 10),
   sessionSecret: process.env.SESSION_SECRET || 'change-me-in-production',
   sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || '86400000', 10),
   backupDir: process.env.BACKUP_DIR || './backups',

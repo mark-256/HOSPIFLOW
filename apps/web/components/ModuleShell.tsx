@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ReactNode, useEffect, useState } from 'react'
+import { ReactNode, useEffect, useState, useCallback, useRef } from 'react'
 import { apiRequest } from '@/lib/api'
 
 type User = {
@@ -56,9 +56,21 @@ export default function ModuleShell({ title, description, children, actions }: M
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const authCheckRef = useRef<Promise<void> | null>(null)
 
-  useEffect(() => {
+  const checkAuth = useCallback(async () => {
+    // Try to use cached user data first
+    const storedUser = window.localStorage.getItem('user')
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser))
+        setLoading(false)
+        return
+      } catch {
+        // Ignore, continue with full check
+      }
+    }
+
     const token = window.localStorage.getItem('token')
     if (!token) {
       router.replace('/login')
@@ -66,21 +78,26 @@ export default function ModuleShell({ title, description, children, actions }: M
       return
     }
 
-    apiRequest<User>('/api/auth/me')
-      .then((response) => setUser(response.data))
-      .catch(() => {
-        window.localStorage.removeItem('token')
-        router.replace('/login')
-      })
-      .finally(() => setLoading(false))
+    try {
+      const response = await apiRequest<User>('/api/auth/me')
+      setUser(response.data)
+      window.localStorage.setItem('user', JSON.stringify(response.data))
+    } catch {
+      window.localStorage.removeItem('token')
+      window.localStorage.removeItem('user')
+      router.replace('/login')
+    } finally {
+      setLoading(false)
+    }
   }, [router])
+
+  useEffect(() => {
+    if (authCheckRef.current) return
+    authCheckRef.current = checkAuth()
+  }, [checkAuth])
 
   if (loading) {
     return <div className="min-h-screen bg-hospiflow-50 flex items-center justify-center"><div className="text-hospiflow-600">Loading HOSPIFLOW...</div></div>
-  }
-
-  if (error) {
-    return <div className="min-h-screen bg-hospiflow-50 flex items-center justify-center"><div className="text-red-600">{error}</div></div>
   }
 
   const signOut = async () => {
@@ -89,6 +106,7 @@ export default function ModuleShell({ title, description, children, actions }: M
       await apiRequest('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
     }
     window.localStorage.removeItem('token')
+    window.localStorage.removeItem('user')
     router.replace('/login')
   }
 

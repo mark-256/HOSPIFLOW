@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ModuleShell from '@/components/ModuleShell'
-import { apiRequest } from '@/lib/api'
 
 type User = {
   firstName?: string
@@ -46,12 +45,18 @@ export default function DashboardPage() {
       router.replace('/login')
       return
     }
-    apiRequest<User>('/api/auth/me')
-      .then((response) => setUser(response.data))
-      .catch(() => {
-        window.localStorage.removeItem('token')
-        router.replace('/login')
-      })
+    // ModuleShell handles auth check; just wait for it
+    const timer = setTimeout(() => {
+      const storedUser = window.localStorage.getItem('user')
+      if (storedUser) {
+        try {
+          setUser(JSON.parse(storedUser))
+        } catch {
+          setUser(null)
+        }
+      }
+    }, 100)
+    return () => clearTimeout(timer)
   }, [router])
 
   if (!user) return <ModuleShell title="Dashboard"><div className="flex min-h-[300px] items-center justify-center text-hospiflow-600">Loading dashboard...</div></ModuleShell>

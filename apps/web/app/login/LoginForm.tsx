@@ -29,6 +29,9 @@ export default function LoginForm() {
       }
 
       localStorage.setItem('token', data.data.token)
+      if (data.data.user) {
+        localStorage.setItem('user', JSON.stringify(data.data.user))
+      }
       router.push('/dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
