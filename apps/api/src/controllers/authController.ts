@@ -13,6 +13,8 @@ export const authController = {
     try {
     const { email, password } = req.body
 
+    console.log('[AUTH-LOGIN] email present:', !!email, 'password present:', !!password)
+
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -25,6 +27,8 @@ export const authController = {
       include: { role: true, organization: true },
     })
 
+    console.log('[AUTH-LOGIN] user found:', !!user, 'isActive:', user?.isActive)
+
     if (!user || !user.isActive) {
       return res.status(401).json({
         success: false,
@@ -33,6 +37,7 @@ export const authController = {
     }
 
     const isValidPassword = await bcrypt.compare(password, user.passwordHash)
+    console.log('[AUTH-LOGIN] password comparison result:', isValidPassword)
 
     if (!isValidPassword) {
       return res.status(401).json({
