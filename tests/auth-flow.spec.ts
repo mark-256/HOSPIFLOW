@@ -9,7 +9,7 @@ test('login and access protected endpoints', async ({ page }) => {
     console.log('RESPONSE:', response.status(), response.url())
   })
 
-  await page.goto('http://localhost:3002/login')
+  await page.goto('http://localhost:3000/login')
   await page.evaluate(() => localStorage.clear())
 
   await page.fill('input[type="email"]', 'admin@hospiflow.com')
@@ -22,7 +22,7 @@ test('login and access protected endpoints', async ({ page }) => {
   const token = await page.evaluate(() => localStorage.getItem('token'))
   console.log('Token in localStorage:', token ? `${token.substring(0, 50)}...` : 'NOT FOUND')
 
-  await page.goto('http://localhost:3002/hotel')
+  await page.goto('http://localhost:3000/hotel')
   await page.waitForTimeout(5000)
 
   const errorText = await page.locator('text=Unable to load hotel operations').count()

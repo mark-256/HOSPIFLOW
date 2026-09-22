@@ -1,4 +1,7 @@
 /** @type {import('next').NextConfig} */
+const API_INTERNAL_URL =
+  process.env.API_INTERNAL_URL || 'http://localhost:3001'
+
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
@@ -10,7 +13,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3001/api/:path*',
+        destination: `${API_INTERNAL_URL}/api/:path*`,
       },
     ]
   },
