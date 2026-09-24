@@ -20,6 +20,18 @@ type MenuItem = {
   label: string
 }
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = token.split('.')[1]
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')
+    const claims = JSON.parse(atob(padded)) as { exp?: number }
+    return typeof claims.exp !== 'number' || claims.exp * 1000 <= Date.now()
+  } catch {
+    return true
+  }
+}
+
 const menuItems: MenuItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/hotel', label: 'Hotel' },
@@ -59,20 +71,10 @@ export default function ModuleShell({ title, description, children, actions }: M
   const authCheckRef = useRef<Promise<void> | null>(null)
 
   const checkAuth = useCallback(async () => {
-    // Try to use cached user data first
-    const storedUser = window.localStorage.getItem('user')
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser))
-        setLoading(false)
-        return
-      } catch {
-        // Ignore, continue with full check
-      }
-    }
-
     const token = window.localStorage.getItem('token')
-    if (!token) {
+    if (!token || isTokenExpired(token)) {
+      window.localStorage.removeItem('token')
+      window.localStorage.removeItem('user')
       router.replace('/login')
       setLoading(false)
       return
@@ -96,7 +98,7 @@ export default function ModuleShell({ title, description, children, actions }: M
     authCheckRef.current = checkAuth()
   }, [checkAuth])
 
-  if (loading) {
+  if (loading || !user) {
     return <div className="min-h-screen bg-hospiflow-50 flex items-center justify-center"><div className="text-hospiflow-600">Loading HOSPIFLOW...</div></div>
   }
 
