@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+
+set -u
+
+API_URL="${API_URL:-[http://localhost:3001}](http://localhost:3001})"
+EMAIL="${HOSPIFLOW_TEST_EMAIL:[-admin@hospiflow.com](mailto:-admin@hospiflow.com)}"
+PASSWORD="${HOSPIFLOW_TEST_PASSWORD:-admin123}"
+
+PASS=0
+FAIL=0
+WARN=0
+
+echo "=============================================="
+echo " HOSPIFLOW AUTHENTICATED API HEALTH CHECK"
+echo "=============================================="
+echo
+echo "API: $API_URL"
+echo
+
+cleanup() {
+unset TOKEN
+}
+trap cleanup EXIT
+
+echo "===== AUTHENTICATION ====="
+
+LOGIN_RESPONSE=$(curl -sS --fail-with-body 
+--max-time 15 
+-X POST "$API_URL/api/auth/login" 
+-H "Content-Type: application/json" 
+-d "{"email":"$EMAIL","password":"$PASSWORD"}" 2>/dev/null || true)
+
+if [ -z "$LOGIN_RESPONSE" ]; then
+echo "[FAIL] Authentication request failed"
+exit 1
+fi
+
+TOKEN=$(printf '%s' "$LOGIN_RESPONSE" | node -e '
+let data="";
+process.stdin.on("data", c => data += c);
+process.stdin.on("end", () => {
+try {
+const json = JSON.parse(data);
+process.stdout.write(json?.data?.token || "");
+} catch {
+process.stdout.write("");
+}
+});
+')
+
+if [ -z "$TOKEN" ]; then
+echo "[FAIL] Login succeeded without receiving an access token"
+echo
+echo "Login response:"
+printf '%s\n' "$LOGIN_RESPONSE"
+exit 1
+fi
+
+echo "[PASS] POST /api/auth/login"
+PASS=$((PASS + 1))
+
+echo
+echo "===== PROTECTED API ENDPOINTS ====="
+
+test_endpoint() {
+local method="$1"
+local path="$2"
+
+local result
+local status
+local body
+
+result=$(curl -sS 
+--max-time 15 
+-X "$method" 
+-H "Authorization: Bearer $TOKEN" 
+-H "Accept: application/json" 
+-w $'\n%{http_code}' 
+"$API_URL$path" 2>/dev/null || true)
+
+status=$(printf '%s\n' "$result" | tail -n 1)
+body=$(printf '%s\n' "$result" | sed '$d')
+
+case "$status" in
+2[0-9][0-9])
+echo "[PASS] $method $path -> $status"
+PASS=$((PASS + 1))
+;;
+
+```
+401)
+  echo "[FAIL] $method $path -> 401 Unauthorized"
+  FAIL=$((FAIL + 1))
+  ;;
+
+403)
+  echo "[WARN] $method $path -> 403 Forbidden"
+  WARN=$((WARN + 1))
+  ;;
+
+404)
+  echo "[WARN] $method $path -> 404 Not Found"
+  WARN=$((WARN + 1))
+  ;;
+
+429)
+  echo "[WARN] $method $path -> 429 Rate Limited"
+  WARN=$((WARN + 1))
+  ;;
+
+5[0-9][0-9])
+  echo "[FAIL] $method $path -> $status"
+  FAIL=$((FAIL + 1))
+  ;;
+
+*)
+  echo "[FAIL] $method $path -> $status"
+  FAIL=$((FAIL + 1))
+  ;;
+```
+
+esac
+}
+
+# Hotel / Front Office
+
+test_endpoint GET "/api/properties"
+test_endpoint GET "/api/rooms?limit=10"
+test_endpoint GET "/api/reservations?limit=10"
+test_endpoint GET "/api/guests?limit=10"
+test_endpoint GET "/api/folios?limit=10"
+
+# Restaurant / POS
+
+test_endpoint GET "/api/orders?limit=10"
+
+# Inventory
+
+test_endpoint GET "/api/inventory"
+
+# Housekeeping
+
+test_endpoint GET "/api/housekeeping"
+
+# Maintenance
+
+test_endpoint GET "/api/maintenance"
+
+# Finance
+
+test_endpoint GET "/api/finance"
+
+# Procurement
+
+test_endpoint GET "/api/procurement"
+
+echo
+echo "=============================================="
+echo " SUMMARY"
+echo "=============================================="
+echo "PASS: $PASS"
+echo "WARN: $WARN"
+echo "FAIL: $FAIL"
+echo
+
+if [ "$FAIL" -gt 0 ]; then
+echo "[RESULT] SYSTEM HAS FAILURES"
+exit 1
+fi
+
+if [ "$WARN" -gt 0 ]; then
+echo "[RESULT] API HEALTH PASSED WITH WARNINGS"
+exit 0
+fi
+
+echo "[RESULT] ALL TESTED APIs PASSED"
+exit 0
+
+
+
+

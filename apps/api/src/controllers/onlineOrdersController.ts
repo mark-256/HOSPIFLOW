@@ -56,7 +56,7 @@ export const onlineOrdersController = {
         subtotal,
         total: subtotal,
         balance: subtotal,
-        createdBy: req.user?.id || guestId || '',
+        createdById: req.user?.id || guestId || '',
       },
     })
     for (const item of orderItems) {
