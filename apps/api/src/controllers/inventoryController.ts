@@ -47,7 +47,11 @@ export const inventoryController = {
     if (!inventoryItemId || !type || quantity === undefined) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Item, type, and quantity are required' } })
     }
-    const movement = await prisma.stockMovement.create({ data: { inventoryItemId, type: type as StockMovementType, quantity: parseFloat(quantity), unitCost: unitCost ? parseFloat(unitCost) : null, reference, batchNumber, expiryDate: expiryDate ? new Date(expiryDate) : undefined, notes, createdBy: req.user?.id } })
+    const parsedQuantity = parseFloat(quantity)
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Quantity must be a positive number' } })
+    }
+    const movement = await prisma.stockMovement.create({ data: { inventoryItemId, type: type as StockMovementType, quantity: parsedQuantity, unitCost: unitCost ? parseFloat(unitCost) : null, reference, batchNumber, expiryDate: expiryDate ? new Date(expiryDate) : undefined, notes, createdBy: req.user?.id } })
     return res.status(201).json({ success: true, data: movement })
   },
 }

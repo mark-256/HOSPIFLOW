@@ -1897,7 +1897,7 @@ async function main() {
   const rawRes = await fetch(`${API}/api/properties`, {
     headers: { Authorization: `Bearer ${testData.token}` },
   })
-  const rateLimitLimit = rawRes.headers.get('rate-limit-limit') || rawRes.headers.get('x-ratelimit-limit')
+  const rateLimitLimit = rawRes.headers.get('ratelimit-limit') || rawRes.headers.get('rate-limit-limit')
   if (rateLimitLimit) {
     pass('RL-01', 'RateLimiting', `Rate limit headers present (limit: ${rateLimitLimit})`)
   } else {
