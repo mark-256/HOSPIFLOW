@@ -1,60 +1,338 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, Wrench } from 'lucide-react'
 import ModuleShell from '@/components/ModuleShell'
+import MetricCard from '@/components/dashboard/MetricCard'
+import { StatusBreakdown, buildBreakdown } from '@/components/dashboard/ChartCard'
+import Button from '@/components/ui/Button'
+import { StatusBadge } from '@/components/ui/Badge'
+import { Card, Table, TableWrapper, TBody, TD, TH, THead, TR } from '@/components/ui/Card'
+import { EmptyState, ErrorState } from '@/components/ui/States'
+import { SkeletonStatGrid, SkeletonTable } from '@/components/ui/Skeleton'
+import { Dialog } from '@/components/ui/Modal'
+import { Field, FormGrid, Input, Select, Textarea } from '@/components/ui/Input'
+import { Tabs } from '@/components/ui/Tabs'
+import { useToast } from '@/components/feedback/Toast'
 import { apiRequest, getErrorMessage, responseData } from '@/lib/api'
+import { MAINTENANCE_STATUS, PRIORITY_STATUS, countByStatus } from '@/lib/status'
+import { formatDate } from '@/lib/format'
+
+type Ticket = {
+  id: string
+  title: string
+  description?: string | null
+  priority: string
+  category?: string
+  status: string
+  createdAt?: string
+  room?: { roomNumber?: string } | null
+  roomId?: string | null
+  assignee?: { firstName?: string; lastName?: string } | null
+}
+
+const FILTERS = [
+  { id: 'ALL', label: 'All' },
+  { id: 'OPEN', label: 'Open' },
+  { id: 'ASSIGNED', label: 'Assigned' },
+  { id: 'IN_PROGRESS', label: 'In progress' },
+  { id: 'RESOLVED', label: 'Resolved' },
+  { id: 'CLOSED', label: 'Closed' },
+]
+
+const EMPTY_FORM = { propertyId: '', roomId: '', title: '', description: '', priority: 'MEDIUM', category: 'GENERAL' }
 
 export default function MaintenancePage() {
-  const [tickets, setTickets] = useState<any[]>([])
-  const [rooms, setRooms] = useState<any[]>([])
-  const [properties, setProperties] = useState<any[]>([])
+  const toast = useToast()
+  const [tickets, setTickets] = useState<Ticket[]>([])
+  const [rooms, setRooms] = useState<Array<{ id: string; roomNumber: string }>>([])
+  const [properties, setProperties] = useState<Array<{ id: string; name: string }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [statusFilter, setStatusFilter] = useState('ALL')
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ propertyId: '', roomId: '', title: '', description: '', priority: 'MEDIUM', category: 'GENERAL' })
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [rowBusy, setRowBusy] = useState('')
+  const [form, setForm] = useState(EMPTY_FORM)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const [ticketResponse, roomResponse, propertyResponse] = await Promise.all([apiRequest<any[]>('/api/maintenance'), apiRequest<any[]>('/api/rooms?limit=200'), apiRequest<any[]>('/api/properties')])
+      const [ticketResponse, roomResponse, propertyResponse] = await Promise.all([
+        apiRequest<Ticket[]>('/api/maintenance?limit=100'),
+        apiRequest<Array<{ id: string; roomNumber: string }>>('/api/rooms?limit=100'),
+        apiRequest<Array<{ id: string; name: string }>>('/api/properties'),
+      ])
       setTickets(responseData(ticketResponse))
       setRooms(responseData(roomResponse))
       setProperties(responseData(propertyResponse))
-    } catch (reason) { setError(getErrorMessage(reason, 'Unable to load maintenance tickets')) } finally { setLoading(false) }
+    } catch (reason) {
+      setError(getErrorMessage(reason, 'Unable to load maintenance tickets'))
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    setError('')
+    setSaving(true)
+    setFormError('')
     try {
       await apiRequest('/api/maintenance', { method: 'POST', body: JSON.stringify(form) })
-      setForm({ propertyId: '', roomId: '', title: '', description: '', priority: 'MEDIUM', category: 'GENERAL' })
+      setForm(EMPTY_FORM)
       setShowForm(false)
-      setNotice('Maintenance ticket created.')
+      toast.success('Ticket created', 'The maintenance ticket is now in the queue.')
       await load()
-    } catch (reason) { setError(getErrorMessage(reason, 'Unable to create maintenance ticket')) }
+    } catch (reason) {
+      setFormError(getErrorMessage(reason, 'Unable to create maintenance ticket'))
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const update = async (ticket: any, status: string) => {
+  const update = async (ticket: Ticket, status: string) => {
+    setRowBusy(ticket.id)
     setError('')
     try {
       await apiRequest(`/api/maintenance/${ticket.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
-      setNotice('Maintenance ticket updated.')
+      toast.success('Ticket updated', `${ticket.title} moved to ${MAINTENANCE_STATUS[status as keyof typeof MAINTENANCE_STATUS]?.label.toLowerCase() || status}.`)
       await load()
-    } catch (reason) { setError(getErrorMessage(reason, 'Unable to update maintenance ticket')) }
+    } catch (reason) {
+      const message = getErrorMessage(reason, 'Unable to update maintenance ticket')
+      setError(message)
+      toast.error('Update failed', message)
+    } finally {
+      setRowBusy('')
+    }
   }
 
+  const visibleTickets = useMemo(
+    () => (statusFilter === 'ALL' ? tickets : tickets.filter((ticket) => ticket.status === statusFilter)),
+    [tickets, statusFilter],
+  )
+
+  const counts = useMemo(() => {
+    const open = tickets.filter((ticket) => !['RESOLVED', 'CLOSED'].includes(ticket.status)).length
+    const urgent = tickets.filter((ticket) => ['HIGH', 'URGENT'].includes(ticket.priority) && !['RESOLVED', 'CLOSED'].includes(ticket.status)).length
+    return { open, urgent }
+  }, [tickets])
+
   return (
-    <ModuleShell title="Maintenance" description="Log and resolve property maintenance tickets">
-      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
-      {notice && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">{notice}</div>}
-      <div className="mb-5 flex justify-end"><button onClick={() => setShowForm((value) => !value)} className="rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700">{showForm ? 'Close form' : 'Create ticket'}</button></div>
-      {showForm && <form onSubmit={submit} className="mb-6 rounded-lg border border-hospiflow-200 bg-white p-5 grid gap-4 md:grid-cols-3"><h2 className="md:col-span-3 text-lg font-semibold">New maintenance ticket</h2><label className="block"><span className="text-sm text-hospiflow-700">Property</span><select required className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.propertyId} onChange={(event) => setForm({ ...form, propertyId: event.target.value })}><option value="">Select property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select></label><label className="block"><span className="text-sm text-hospiflow-700">Room</span><select className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.roomId} onChange={(event) => setForm({ ...form, roomId: event.target.value })}><option value="">General property</option>{rooms.map((room) => <option key={room.id} value={room.id}>Room {room.roomNumber}</option>)}</select></label><label className="block"><span className="text-sm text-hospiflow-700">Priority</span><select className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></label><label className="md:col-span-2 block"><span className="text-sm text-hospiflow-700">Title</span><input required className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label className="md:col-span-3 block"><span className="text-sm text-hospiflow-700">Description</span><textarea required rows={3} className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label><button type="submit" className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white self-end">Create ticket</button></form>}
-      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading maintenance...</div> : tickets.length === 0 ? <div className="rounded-lg border border-hospiflow-200 bg-white p-8 text-center text-hospiflow-600">No maintenance tickets found.</div> : <section className="rounded-lg border border-hospiflow-200 bg-white overflow-hidden"><div className="overflow-x-auto"><table className="min-w-full divide-y divide-hospiflow-200"><thead className="bg-hospiflow-50"><tr><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Title</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Room</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Priority</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Status</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Actions</th></tr></thead><tbody className="divide-y divide-hospiflow-200">{tickets.map((ticket) => <tr key={ticket.id}><td className="px-5 py-3 text-sm">{ticket.title}</td><td className="px-5 py-3 text-sm">{ticket.room?.roomNumber || ticket.roomId || 'Property'}</td><td className="px-5 py-3 text-sm">{ticket.priority}</td><td className="px-5 py-3 text-sm"><span className="rounded bg-hospiflow-100 px-2 py-1 text-xs">{ticket.status}</span></td><td className="px-5 py-3 text-sm">{ticket.status === 'OPEN' && <button onClick={() => void update(ticket, 'ASSIGNED')} className="rounded bg-primary-600 px-2 py-1 text-xs text-white">Assign</button>}{ticket.status === 'ASSIGNED' && <button onClick={() => void update(ticket, 'IN_PROGRESS')} className="rounded bg-yellow-600 px-2 py-1 text-xs text-white">Start</button>}{['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING'].includes(ticket.status) && <button onClick={() => void update(ticket, 'RESOLVED')} className="ml-2 rounded bg-green-600 px-2 py-1 text-xs text-white">Resolve</button>}{ticket.status === 'RESOLVED' && <button onClick={() => void update(ticket, 'CLOSED')} className="rounded bg-hospiflow-600 px-2 py-1 text-xs text-white">Close</button>}</td></tr>)}</tbody></table></div></section>}
+    <ModuleShell
+      title="Maintenance"
+      description="Property tickets, repairs, and resolution tracking"
+      actions={
+        <Button size="sm" onClick={() => setShowForm(true)} leadingIcon={<Plus aria-hidden="true" className="h-4 w-4" />}>
+          <span className="hidden sm:inline">Create ticket</span>
+          <span className="sm:hidden">New</span>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {error ? <ErrorState title="Maintenance" message={error} onRetry={() => void load()} compact /> : null}
+
+        <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="Tickets" value={tickets.length} icon={Wrench} tone="brand" loading={loading} />
+          <MetricCard label="Open tickets" value={counts.open} icon={Wrench} tone="info" loading={loading} />
+          <MetricCard
+            label="High priority"
+            value={counts.urgent}
+            icon={Wrench}
+            tone={counts.urgent > 0 ? 'danger' : 'neutral'}
+            hint="Open high or urgent tickets"
+            loading={loading}
+          />
+          <MetricCard label="Resolved" value={tickets.filter((ticket) => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length} icon={Wrench} tone="success" loading={loading} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="overflow-hidden lg:col-span-2">
+            <div className="px-2 sm:px-3">
+              <Tabs
+                ariaLabel="Filter maintenance tickets"
+                items={FILTERS.map((filter) => ({
+                  ...filter,
+                  count: filter.id === 'ALL' ? tickets.length : tickets.filter((ticket) => ticket.status === filter.id).length,
+                }))}
+                value={statusFilter}
+                onChange={setStatusFilter}
+              />
+            </div>
+            {loading ? (
+              <div className="px-4 py-4 sm:px-5">
+                <SkeletonTable rows={5} columns={4} className="border-0 shadow-none" />
+              </div>
+            ) : tickets.length === 0 ? (
+              <EmptyState
+                icon={<Wrench className="h-5 w-5" />}
+                title="No maintenance tickets"
+                description="Log a ticket to track repairs and technical issues for the property."
+                action={
+                  <Button size="sm" onClick={() => setShowForm(true)} leadingIcon={<Plus aria-hidden="true" className="h-4 w-4" />}>
+                    Create ticket
+                  </Button>
+                }
+              />
+            ) : visibleTickets.length === 0 ? (
+              <EmptyState
+                size="icon"
+                title="No tickets in this state"
+                description="Switch to another status to see the rest of the queue."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => setStatusFilter('ALL')}>
+                    Show all tickets
+                  </Button>
+                }
+              />
+            ) : (
+              <TableWrapper>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>Ticket</TH>
+                      <TH>Location</TH>
+                      <TH>Priority</TH>
+                      <TH>Status</TH>
+                      <TH className="text-right">Actions</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {visibleTickets.map((ticket) => (
+                      <TR key={ticket.id}>
+                        <TD>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-ink-900">{ticket.title}</p>
+                            <p className="truncate text-xs text-ink-500">
+                              {(ticket.category || 'General').toLowerCase()} · {formatDate(ticket.createdAt)}
+                            </p>
+                          </div>
+                        </TD>
+                        <TD className="text-ink-500">
+                          {ticket.room ? `Room ${ticket.room.roomNumber}` : ticket.roomId ? 'Room' : 'Property-wide'}
+                        </TD>
+                        <TD>
+                          <StatusBadge status={ticket.priority} registry={PRIORITY_STATUS} />
+                        </TD>
+                        <TD>
+                          <StatusBadge status={ticket.status} registry={MAINTENANCE_STATUS} />
+                        </TD>
+                        <TD className="text-right">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {ticket.status === 'OPEN' ? (
+                              <Button size="sm" variant="outline" loading={rowBusy === ticket.id} onClick={() => void update(ticket, 'ASSIGNED')}>
+                                Assign
+                              </Button>
+                            ) : null}
+                            {ticket.status === 'ASSIGNED' ? (
+                              <Button size="sm" variant="outline" loading={rowBusy === ticket.id} onClick={() => void update(ticket, 'IN_PROGRESS')}>
+                                Start
+                              </Button>
+                            ) : null}
+                            {['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING'].includes(ticket.status) ? (
+                              <Button size="sm" variant="outline" loading={rowBusy === ticket.id} onClick={() => void update(ticket, 'RESOLVED')}>
+                                Resolve
+                              </Button>
+                            ) : null}
+                            {ticket.status === 'RESOLVED' ? (
+                              <Button size="sm" variant="outline" loading={rowBusy === ticket.id} onClick={() => void update(ticket, 'CLOSED')}>
+                                Close
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrapper>
+            )}
+          </Card>
+
+          <StatusBreakdown
+            title="Ticket status"
+            description="Distribution across the maintenance queue"
+            items={buildBreakdown(countByStatus(tickets, 'status'), MAINTENANCE_STATUS, ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED'])}
+          />
+        </div>
+      </div>
+
+      <Dialog
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title="New maintenance ticket"
+        description="Record the issue, location, and priority for the technical team."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="maintenance-form" loading={saving} loadingLabel="Creating">
+              Create ticket
+            </Button>
+          </>
+        }
+      >
+        <form id="maintenance-form" onSubmit={submit} className="space-y-4" noValidate>
+          {formError ? <ErrorState compact title="Unable to create ticket" message={formError} /> : null}
+          <FormGrid>
+            <Field label="Property" htmlFor="ticketProperty" required>
+              <Select id="ticketProperty" required value={form.propertyId} onChange={(event) => setForm({ ...form, propertyId: event.target.value })}>
+                <option value="">Select property</option>
+                {properties.map((property) => (
+                  <option key={property.id} value={property.id}>
+                    {property.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Room" htmlFor="ticketRoom" hint="Optional - leave empty for property-wide issues.">
+              <Select id="ticketRoom" value={form.roomId} onChange={(event) => setForm({ ...form, roomId: event.target.value })}>
+                <option value="">Property-wide</option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.roomNumber}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Priority" htmlFor="ticketPriority" required>
+              <Select id="ticketPriority" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </Select>
+            </Field>
+            <Field label="Category" htmlFor="ticketCategory" required className="sm:col-span-2">
+              <Select id="ticketCategory" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+                <option value="GENERAL">General</option>
+                <option value="ELECTRICAL">Electrical</option>
+                <option value="PLUMBING">Plumbing</option>
+                <option value="HVAC">HVAC</option>
+                <option value="APPLIANCE">Appliance</option>
+              </Select>
+            </Field>
+            <Field label="Title" htmlFor="ticketTitle" required className="sm:col-span-2 lg:col-span-3">
+              <Input id="ticketTitle" required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+            </Field>
+          </FormGrid>
+          <Field label="Description" htmlFor="ticketDescription" required>
+            <Textarea
+              id="ticketDescription"
+              required
+              rows={4}
+              value={form.description}
+              onChange={(event) => setForm({ ...form, description: event.target.value })}
+            />
+          </Field>
+        </form>
+      </Dialog>
     </ModuleShell>
   )
 }

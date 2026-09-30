@@ -4,16 +4,221 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    color-scheme: light;
+
+    /* Layout rhythm */
+    --hf-page-padding: 1rem;
+    --hf-header-height: 3.75rem;
+
+    /* Motion */
+    --hf-transition-fast: 150ms;
+    --hf-transition-base: 200ms;
+    --hf-transition-slow: 250ms;
+  }
+
+  @media (min-width: 640px) {
+    :root {
+      --hf-page-padding: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    :root {
+      --hf-page-padding: 2rem;
+    }
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-[0.9375rem] leading-6 text-ink-800 antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold tracking-[-0.01em] text-ink-900;
+  }
+
+  /* Visible, consistent focus treatment for every interactive element. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white;
+  }
+
+  ::selection {
+    @apply bg-brand-100 text-brand-900;
+  }
+
+  /* Compact, unobtrusive scrollbars for data-dense panels. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.ink.300') transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-[3px] border-solid border-transparent bg-ink-300 bg-clip-content;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-400 bg-clip-content;
   }
 }
 
-@layer base {
-  * {
-    @apply border-hospiflow-200;
+@layer components {
+  /* ---------------------------------------------------------------------
+   * Typography scale
+   * ------------------------------------------------------------------- */
+  .hf-display {
+    @apply text-2xl font-semibold leading-8 tracking-[-0.015em] text-ink-900 sm:text-[1.75rem] sm:leading-9;
   }
-  body {
-    @apply bg-hospiflow-50 text-hospiflow-900;
+
+  .hf-page-title {
+    @apply truncate text-lg font-semibold leading-7 tracking-[-0.01em] text-ink-900 sm:text-xl;
+  }
+
+  .hf-page-description {
+    @apply truncate text-sm text-ink-500;
+  }
+
+  .hf-section-title {
+    @apply text-base font-semibold leading-6 text-ink-900;
+  }
+
+  .hf-card-title {
+    @apply text-sm font-semibold leading-5 text-ink-900;
+  }
+
+  .hf-body {
+    @apply text-sm leading-6 text-ink-700;
+  }
+
+  .hf-secondary {
+    @apply text-sm leading-5 text-ink-500;
+  }
+
+  .hf-label {
+    @apply text-[0.8125rem] font-medium leading-5 text-ink-700;
+  }
+
+  .hf-caption {
+    @apply text-xs leading-4 text-ink-500;
+  }
+
+  .hf-table-header {
+    @apply whitespace-nowrap px-4 py-2.5 text-left text-2xs font-semibold uppercase tracking-[0.06em] text-ink-500;
+  }
+
+  .hf-table-cell {
+    @apply whitespace-nowrap px-4 py-3 text-sm text-ink-700;
+  }
+
+  .hf-metric {
+    @apply text-2xl font-semibold leading-8 tracking-[-0.02em] text-ink-900 tabular-nums sm:text-[1.75rem];
+  }
+
+  .hf-overline {
+    @apply text-2xs font-semibold uppercase tracking-[0.08em] text-ink-500;
+  }
+
+  /* ---------------------------------------------------------------------
+   * Layout primitives
+   * ------------------------------------------------------------------- */
+  .hf-page {
+    @apply mx-auto w-full max-w-content space-y-6 px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8;
+  }
+
+  .hf-section {
+    @apply space-y-4;
+  }
+
+  .hf-card {
+    @apply rounded-lg border border-line bg-surface shadow-xs;
+  }
+
+  .hf-card-header {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5;
+  }
+
+  .hf-card-body {
+    @apply px-4 py-4 sm:px-5;
+  }
+
+  .hf-divider {
+    @apply border-t border-line;
+  }
+
+  /* Screen-reader-only helper */
+  .hf-sr-only {
+    @apply absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 [clip:rect(0,0,0,0)];
+  }
+
+  /* Tooltip used by the collapsed sidebar and dense icon actions. */
+  .hf-tooltip {
+    @apply pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-line bg-ink-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-md transition-opacity duration-150;
+  }
+
+  .hf-tooltip-trigger:hover .hf-tooltip,
+  .hf-tooltip-trigger:focus-visible .hf-tooltip {
+    @apply opacity-100;
+  }
+}
+
+@layer utilities {
+  .hf-skeleton {
+    @apply relative overflow-hidden rounded-md bg-ink-100;
+  }
+
+  .hf-skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/60 to-transparent;
+    animation: hf-shimmer 1.6s infinite;
+  }
+
+  .hf-scroll-shadow {
+    background-image: linear-gradient(to right, white 30%, rgb(255 255 255 / 0)),
+      linear-gradient(to right, rgb(255 255 255 / 0), white 70%),
+      linear-gradient(to right, rgb(16 24 32 / 0.08), rgb(16 24 32 / 0)),
+      linear-gradient(to left, rgb(16 24 32 / 0.08), rgb(16 24 32 / 0));
+    background-position: left center, right center, left center, right center;
+    background-repeat: no-repeat;
+    background-size: 32px 100%, 32px 100%, 14px 100%, 14px 100%;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
+@keyframes hf-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Respect the OS reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

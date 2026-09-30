@@ -1,31 +1,95 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CalendarCheck, Filter, Plus, Search } from 'lucide-react'
 import ModuleShell from '@/components/ModuleShell'
+import Button from '@/components/ui/Button'
+import { StatusBadge } from '@/components/ui/Badge'
+import { Card, Table, TableWrapper, TBody, TD, TH, THead, TR } from '@/components/ui/Card'
+import { EmptyState, ErrorState, NoResultsState } from '@/components/ui/States'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { Pagination } from '@/components/ui/Pagination'
+import { Dialog, Drawer } from '@/components/ui/Modal'
+import { Field, FormGrid, Input, Select, Textarea } from '@/components/ui/Input'
+import { Tabs } from '@/components/ui/Tabs'
+import { useToast } from '@/components/feedback/Toast'
 import { apiRequest, getErrorMessage, responseData } from '@/lib/api'
+import { RESERVATION_STATUS } from '@/lib/status'
+import { formatCurrency, formatDate, fullName } from '@/lib/format'
+
+type Reservation = {
+  id: string
+  confirmationCode: string
+  status: string
+  checkInDate: string
+  checkOutDate: string
+  adults?: number
+  children?: number
+  rate?: number | string
+  totalAmount?: number | string
+  specialRequests?: string | null
+  notes?: string | null
+  roomId?: string | null
+  room?: { id: string; roomNumber: string; roomType?: { name?: string } | null } | null
+  guest?: { firstName?: string; lastName?: string; email?: string; phone?: string } | null
+}
+
+const STATUS_FILTERS = [
+  { id: 'ALL', label: 'All' },
+  { id: 'PENDING', label: 'Pending' },
+  { id: 'CONFIRMED', label: 'Confirmed' },
+  { id: 'CHECKED_IN', label: 'Checked in' },
+  { id: 'CHECKED_OUT', label: 'Checked out' },
+  { id: 'CANCELLED', label: 'Cancelled' },
+  { id: 'NO_SHOW', label: 'No show' },
+]
+
+const EMPTY_FORM = {
+  propertyId: '',
+  guestId: '',
+  roomTypeId: '',
+  roomId: '',
+  checkInDate: '',
+  checkOutDate: '',
+  adults: 1,
+  children: 0,
+  rate: 0,
+  specialRequests: '',
+  notes: '',
+}
 
 export default function ReservationsPage() {
-  const [reservations, setReservations] = useState<any[]>([])
-  const [properties, setProperties] = useState<any[]>([])
-  const [roomTypes, setRoomTypes] = useState<any[]>([])
-  const [guests, setGuests] = useState<any[]>([])
+  const toast = useToast()
+  const [reservations, setReservations] = useState<Reservation[]>([])
+  const [meta, setMeta] = useState<{ total?: number; totalPages?: number }>({})
+  const [properties, setProperties] = useState<Array<{ id: string; name: string }>>([])
+  const [roomTypes, setRoomTypes] = useState<Array<{ id: string; name: string; rooms?: Array<{ id: string; roomNumber: string }> }>>([])
+  const [guests, setGuests] = useState<Array<{ id: string; firstName?: string; lastName?: string }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(25)
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [query, setQuery] = useState('')
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ propertyId: '', guestId: '', roomTypeId: '', roomId: '', checkInDate: '', checkOutDate: '', adults: 1, children: 0, rate: 0, specialRequests: '', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [rowBusy, setRowBusy] = useState('')
+  const [detail, setDetail] = useState<Reservation | null>(null)
+  const [form, setForm] = useState(EMPTY_FORM)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const [reservationResponse, propertyResponse, roomTypeResponse, guestResponse] = await Promise.all([
-        apiRequest<any[]>('/api/reservations?limit=100'),
-        apiRequest<any[]>('/api/properties'),
-        apiRequest<any[]>('/api/room-types'),
-        apiRequest<any[]>('/api/guests?limit=100'),
+        apiRequest<Reservation[]>(`/api/reservations?limit=${limit}&page=${page}`),
+        apiRequest<Array<{ id: string; name: string }>>('/api/properties'),
+        apiRequest<Array<{ id: string; name: string; rooms?: Array<{ id: string; roomNumber: string }> }>>('/api/room-types'),
+        apiRequest<Array<{ id: string; firstName?: string; lastName?: string }>>('/api/guests?limit=100'),
       ])
       setReservations(responseData(reservationResponse))
+      setMeta({ total: reservationResponse.meta?.total as number | undefined, totalPages: reservationResponse.meta?.totalPages as number | undefined })
       setProperties(responseData(propertyResponse))
       setRoomTypes(responseData(roomTypeResponse))
       setGuests(responseData(guestResponse))
@@ -34,60 +98,439 @@ export default function ReservationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [limit, page])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    setError('')
+    setSaving(true)
+    setFormError('')
     try {
-      await apiRequest('/api/reservations', { method: 'POST', body: JSON.stringify(form) })
-      setForm({ propertyId: '', guestId: '', roomTypeId: '', roomId: '', checkInDate: '', checkOutDate: '', adults: 1, children: 0, rate: 0, specialRequests: '', notes: '' })
+      const response = await apiRequest<{ confirmationCode?: string }>('/api/reservations', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      })
+      setForm(EMPTY_FORM)
       setShowForm(false)
-      setNotice('Reservation created successfully.')
+      toast.success('Reservation created', response.data?.confirmationCode ? `Confirmation ${response.data.confirmationCode}` : undefined)
       await load()
     } catch (reason) {
-      setError(getErrorMessage(reason, 'Unable to create reservation'))
+      setFormError(getErrorMessage(reason, 'Unable to create reservation'))
+    } finally {
+      setSaving(false)
     }
   }
 
-  const updateStatus = async (reservation: any, status: string) => {
+  const updateStatus = async (reservation: Reservation, status: string) => {
+    setRowBusy(reservation.id)
     setError('')
     try {
       await apiRequest(`/api/reservations/${reservation.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
-      setNotice(`Reservation ${reservation.confirmationCode} updated.`)
+      toast.success('Reservation updated', `${reservation.confirmationCode} is now ${RESERVATION_STATUS[status as keyof typeof RESERVATION_STATUS]?.label.toLowerCase() || status}.`)
       await load()
     } catch (reason) {
       setError(getErrorMessage(reason, 'Unable to update reservation'))
+      toast.error('Update failed', getErrorMessage(reason, 'Unable to update reservation'))
+    } finally {
+      setRowBusy('')
     }
   }
 
+  const visibleReservations = useMemo(() => {
+    const term = query.trim().toLowerCase()
+    return reservations.filter((reservation) => {
+      const matchesStatus = statusFilter === 'ALL' || reservation.status === statusFilter
+      const matchesQuery =
+        !term ||
+        String(reservation.confirmationCode || '').toLowerCase().includes(term) ||
+        fullName(reservation.guest).toLowerCase().includes(term) ||
+        String(reservation.room?.roomNumber || '').toLowerCase().includes(term)
+      return matchesStatus && matchesQuery
+    })
+  }, [reservations, statusFilter, query])
+
   return (
-    <ModuleShell title="Reservations" description="Create bookings and manage the guest arrival workflow">
-      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
-      {notice && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">{notice}</div>}
-      <div className="mb-5 flex justify-end"><button onClick={() => setShowForm((value) => !value)} className="rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700">{showForm ? 'Close form' : 'New reservation'}</button></div>
-      {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 rounded-lg border border-hospiflow-200 bg-white p-5 grid gap-4 md:grid-cols-3">
-          <h2 className="md:col-span-3 text-lg font-semibold">Reservation details</h2>
-          <label className="block"><span className="text-sm text-hospiflow-700">Property</span><select required className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.propertyId} onChange={(event) => setForm({ ...form, propertyId: event.target.value })}><option value="">Select property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Guest</span><select required className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.guestId} onChange={(event) => setForm({ ...form, guestId: event.target.value })}><option value="">Select guest</option>{guests.map((guest) => <option key={guest.id} value={guest.id}>{guest.firstName} {guest.lastName}</option>)}</select></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Room type</span><select required className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.roomTypeId} onChange={(event) => setForm({ ...form, roomTypeId: event.target.value })}><option value="">Select room type</option>{roomTypes.map((roomType) => <option key={roomType.id} value={roomType.id}>{roomType.name}</option>)}</select></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Room (optional)</span><select className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2 bg-white" value={form.roomId} onChange={(event) => setForm({ ...form, roomId: event.target.value })}><option value="">Unassigned</option>{roomTypes.flatMap((roomType) => roomType.rooms || []).map((room: any) => <option key={room.id} value={room.id}>Room {room.roomNumber}</option>)}</select></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Check-in</span><input required type="date" className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.checkInDate} onChange={(event) => setForm({ ...form, checkInDate: event.target.value })} /></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Check-out</span><input required type="date" className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.checkOutDate} onChange={(event) => setForm({ ...form, checkOutDate: event.target.value })} /></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Adults</span><input required type="number" min="1" className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.adults} onChange={(event) => setForm({ ...form, adults: Number(event.target.value) })} /></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Children</span><input type="number" min="0" className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.children} onChange={(event) => setForm({ ...form, children: Number(event.target.value) })} /></label>
-          <label className="block"><span className="text-sm text-hospiflow-700">Rate</span><input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.rate} onChange={(event) => setForm({ ...form, rate: Number(event.target.value) })} /></label>
-          <label className="md:col-span-2 block"><span className="text-sm text-hospiflow-700">Special requests</span><textarea className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.specialRequests} onChange={(event) => setForm({ ...form, specialRequests: event.target.value })} /></label>
-          <label className="md:col-span-3 block"><span className="text-sm text-hospiflow-700">Notes</span><textarea className="mt-1 w-full rounded-md border border-hospiflow-300 px-3 py-2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-          <button type="submit" className="md:col-span-3 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white">Create reservation</button>
+    <ModuleShell
+      title="Reservations"
+      description="Bookings, arrivals, and departures"
+      actions={
+        <Button size="sm" onClick={() => setShowForm(true)} leadingIcon={<Plus aria-hidden="true" className="h-4 w-4" />}>
+          <span className="hidden sm:inline">New reservation</span>
+          <span className="sm:hidden">New</span>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {error ? <ErrorState title="Reservation data is out of date" message={error} onRetry={() => void load()} compact /> : null}
+
+        <Card>
+          <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="relative w-full sm:max-w-xs">
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search confirmation, guest, or room"
+                aria-label="Search reservations"
+                leadingSlot={<Search aria-hidden="true" className="h-4 w-4" />}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="hf-caption tabular-nums">{meta.total ? `${meta.total} reservations` : `${reservations.length} on this page`}</span>
+              <Button variant="outline" size="sm" onClick={() => void load()} leadingIcon={<Filter aria-hidden="true" className="h-4 w-4" />}>
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            </div>
+          </div>
+          <div className="px-2 sm:px-3">
+            <Tabs
+              ariaLabel="Filter reservations by status"
+              items={STATUS_FILTERS}
+              value={statusFilter}
+              onChange={(value) => {
+                setStatusFilter(value)
+                setPage(1)
+              }}
+            />
+          </div>
+        </Card>
+
+        {loading ? (
+          <SkeletonTable rows={6} columns={5} />
+        ) : reservations.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={<CalendarCheck className="h-5 w-5" />}
+              title="No reservations yet"
+              description="Create your first reservation to start managing guest stays and arrivals."
+              action={
+                <Button size="sm" onClick={() => setShowForm(true)} leadingIcon={<Plus aria-hidden="true" className="h-4 w-4" />}>
+                  New reservation
+                </Button>
+              }
+            />
+          </Card>
+        ) : visibleReservations.length === 0 ? (
+          <Card>
+            <NoResultsState
+              query={query || STATUS_FILTERS.find((item) => item.id === statusFilter)?.label}
+              onClear={() => {
+                setQuery('')
+                setStatusFilter('ALL')
+              }}
+            />
+          </Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <TableWrapper>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>Confirmation</TH>
+                    <TH>Guest</TH>
+                    <TH>Room</TH>
+                    <TH>Stay</TH>
+                    <TH>Status</TH>
+                    <TH className="text-right">Actions</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {visibleReservations.map((reservation) => (
+                    <TR key={reservation.id}>
+                      <TD>
+                        <button
+                          type="button"
+                          onClick={() => setDetail(reservation)}
+                          className="rounded font-medium text-brand-700 hover:text-brand-800 hover:underline"
+                        >
+                          {reservation.confirmationCode}
+                        </button>
+                      </TD>
+                      <TD className="text-ink-900">{fullName(reservation.guest)}</TD>
+                      <TD className="text-ink-500">{reservation.room ? `Room ${reservation.room.roomNumber}` : 'Unassigned'}</TD>
+                      <TD className="text-ink-500">
+                        {formatDate(reservation.checkInDate)} - {formatDate(reservation.checkOutDate)}
+                      </TD>
+                      <TD>
+                        <StatusBadge status={reservation.status} registry={RESERVATION_STATUS} />
+                      </TD>
+                      <TD className="text-right">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {reservation.status === 'PENDING' ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              loading={rowBusy === reservation.id}
+                              onClick={() => void updateStatus(reservation, 'CONFIRMED')}
+                            >
+                              Confirm
+                            </Button>
+                          ) : null}
+                          {reservation.status === 'CONFIRMED' ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              loading={rowBusy === reservation.id}
+                              onClick={() => void updateStatus(reservation, 'CHECKED_IN')}
+                            >
+                              Check in
+                            </Button>
+                          ) : null}
+                          {reservation.status === 'CHECKED_IN' ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              loading={rowBusy === reservation.id}
+                              onClick={() => void updateStatus(reservation, 'CHECKED_OUT')}
+                            >
+                              Check out
+                            </Button>
+                          ) : null}
+                          {['PENDING', 'CONFIRMED'].includes(reservation.status) ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-danger-700 hover:bg-danger-50"
+                              loading={rowBusy === reservation.id}
+                              onClick={() => void updateStatus(reservation, 'CANCELLED')}
+                            >
+                              Cancel
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="ghost" onClick={() => setDetail(reservation)}>
+                            Details
+                          </Button>
+                        </div>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </TableWrapper>
+            <Pagination
+              page={page}
+              limit={limit}
+              total={meta.total}
+              totalPages={meta.totalPages}
+              onPageChange={setPage}
+              onLimitChange={(value) => {
+                setLimit(value)
+                setPage(1)
+              }}
+              itemLabel="reservations"
+            />
+          </Card>
+        )}
+      </div>
+
+      <Dialog
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title="New reservation"
+        description="Capture the stay details and assign the reservation to a property."
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="reservation-form" loading={saving} loadingLabel="Creating">
+              Create reservation
+            </Button>
+          </>
+        }
+      >
+        <form id="reservation-form" onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {formError ? <ErrorState compact title="Unable to create reservation" message={formError} /> : null}
+          <FormGrid>
+            <Field label="Property" htmlFor="propertyId" required>
+              <Select
+                id="propertyId"
+                required
+                value={form.propertyId}
+                onChange={(event) => setForm({ ...form, propertyId: event.target.value })}
+              >
+                <option value="">Select property</option>
+                {properties.map((property) => (
+                  <option key={property.id} value={property.id}>
+                    {property.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Guest" htmlFor="guestId" required>
+              <Select
+                id="guestId"
+                required
+                value={form.guestId}
+                onChange={(event) => setForm({ ...form, guestId: event.target.value })}
+              >
+                <option value="">Select guest</option>
+                {guests.map((guest) => (
+                  <option key={guest.id} value={guest.id}>
+                    {fullName(guest)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Room type" htmlFor="roomTypeId" required>
+              <Select
+                id="roomTypeId"
+                required
+                value={form.roomTypeId}
+                onChange={(event) => setForm({ ...form, roomTypeId: event.target.value, roomId: '' })}
+              >
+                <option value="">Select room type</option>
+                {roomTypes.map((roomType) => (
+                  <option key={roomType.id} value={roomType.id}>
+                    {roomType.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Room" htmlFor="roomId" hint="Optional - can be assigned at check-in.">
+              <Select id="roomId" value={form.roomId} onChange={(event) => setForm({ ...form, roomId: event.target.value })}>
+                <option value="">Unassigned</option>
+                {(roomTypes.find((roomType) => roomType.id === form.roomTypeId)?.rooms || []).map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.roomNumber}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Check-in" htmlFor="checkInDate" required>
+              <Input
+                id="checkInDate"
+                type="date"
+                required
+                value={form.checkInDate}
+                onChange={(event) => setForm({ ...form, checkInDate: event.target.value })}
+              />
+            </Field>
+            <Field label="Check-out" htmlFor="checkOutDate" required>
+              <Input
+                id="checkOutDate"
+                type="date"
+                required
+                value={form.checkOutDate}
+                onChange={(event) => setForm({ ...form, checkOutDate: event.target.value })}
+              />
+            </Field>
+            <Field label="Adults" htmlFor="adults" required>
+              <Input
+                id="adults"
+                type="number"
+                min={1}
+                required
+                value={form.adults}
+                onChange={(event) => setForm({ ...form, adults: Number(event.target.value) })}
+              />
+            </Field>
+            <Field label="Children" htmlFor="children">
+              <Input
+                id="children"
+                type="number"
+                min={0}
+                value={form.children}
+                onChange={(event) => setForm({ ...form, children: Number(event.target.value) })}
+              />
+            </Field>
+            <Field label="Rate" htmlFor="rate" hint="Per night, in property currency.">
+              <Input
+                id="rate"
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.rate}
+                onChange={(event) => setForm({ ...form, rate: Number(event.target.value) })}
+              />
+            </Field>
+          </FormGrid>
+          <Field label="Special requests" htmlFor="specialRequests">
+            <Textarea
+              id="specialRequests"
+              value={form.specialRequests}
+              onChange={(event) => setForm({ ...form, specialRequests: event.target.value })}
+              placeholder="Accessibility, arrival time, or preference notes"
+            />
+          </Field>
+          <Field label="Internal notes" htmlFor="notes">
+            <Textarea
+              id="notes"
+              value={form.notes}
+              onChange={(event) => setForm({ ...form, notes: event.target.value })}
+            />
+          </Field>
         </form>
-      )}
-      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading reservations...</div> : reservations.length === 0 ? <div className="rounded-lg border border-hospiflow-200 bg-white p-8 text-center text-hospiflow-600">No reservations found.</div> : (
-        <section className="rounded-lg border border-hospiflow-200 bg-white overflow-hidden"><div className="overflow-x-auto"><table className="min-w-full divide-y divide-hospiflow-200"><thead className="bg-hospiflow-50"><tr><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Code</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Guest</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Check-in</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Check-out</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Status</th><th className="px-5 py-3 text-left text-xs font-medium uppercase text-hospiflow-600">Actions</th></tr></thead><tbody className="divide-y divide-hospiflow-200">{reservations.map((reservation) => <tr key={reservation.id}><td className="px-5 py-3 text-sm">{reservation.confirmationCode}</td><td className="px-5 py-3 text-sm">{reservation.guest?.firstName || ''} {reservation.guest?.lastName || ''}</td><td className="px-5 py-3 text-sm">{new Date(reservation.checkInDate).toLocaleDateString()}</td><td className="px-5 py-3 text-sm">{new Date(reservation.checkOutDate).toLocaleDateString()}</td><td className="px-5 py-3 text-sm"><span className="rounded bg-hospiflow-100 px-2 py-1 text-xs">{reservation.status}</span></td><td className="px-5 py-3 text-sm">{reservation.status === 'PENDING' && <button onClick={() => void updateStatus(reservation, 'CONFIRMED')} className="rounded bg-primary-600 px-2 py-1 text-xs text-white">Confirm</button>}{reservation.status === 'CONFIRMED' && <button onClick={() => void updateStatus(reservation, 'CHECKED_IN')} className="rounded bg-green-600 px-2 py-1 text-xs text-white">Check in</button>}{reservation.status === 'CHECKED_IN' && <button onClick={() => void updateStatus(reservation, 'CHECKED_OUT')} className="rounded bg-hospiflow-600 px-2 py-1 text-xs text-white">Check out</button>}{['PENDING', 'CONFIRMED'].includes(reservation.status) && <button onClick={() => void updateStatus(reservation, 'CANCELLED')} className="ml-2 rounded bg-red-600 px-2 py-1 text-xs text-white">Cancel</button>}</td></tr>)}</tbody></table></div></section>
-      )}
+      </Dialog>
+
+      <Drawer
+        open={Boolean(detail)}
+        onClose={() => setDetail(null)}
+        title={detail ? `Reservation ${detail.confirmationCode}` : 'Reservation'}
+        description={detail ? fullName(detail.guest) : undefined}
+        footer={
+          <Button variant="outline" onClick={() => setDetail(null)}>
+            Close
+          </Button>
+        }
+      >
+        {detail ? (
+          <dl className="space-y-4 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <dt className="hf-caption">Status</dt>
+              <dd>
+                <StatusBadge status={detail.status} registry={RESERVATION_STATUS} />
+              </dd>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <dt className="hf-caption">Check-in</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">{formatDate(detail.checkInDate)}</dd>
+              </div>
+              <div>
+                <dt className="hf-caption">Check-out</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">{formatDate(detail.checkOutDate)}</dd>
+              </div>
+              <div>
+                <dt className="hf-caption">Room</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">
+                  {detail.room ? `Room ${detail.room.roomNumber}` : 'Unassigned'}
+                </dd>
+              </div>
+              <div>
+                <dt className="hf-caption">Rate</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">{formatCurrency(detail.rate || 0)}</dd>
+              </div>
+              <div>
+                <dt className="hf-caption">Guests</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">
+                  {detail.adults || 0} adults{detail.children ? `, ${detail.children} children` : ''}
+                </dd>
+              </div>
+              <div>
+                <dt className="hf-caption">Contact</dt>
+                <dd className="mt-0.5 font-medium text-ink-900">{detail.guest?.email || detail.guest?.phone || 'Not recorded'}</dd>
+              </div>
+            </div>
+            {detail.specialRequests ? (
+              <div>
+                <dt className="hf-caption">Special requests</dt>
+                <dd className="mt-1 rounded-md border border-line bg-surface-muted px-3 py-2 text-ink-700">{detail.specialRequests}</dd>
+              </div>
+            ) : null}
+            {detail.notes ? (
+              <div>
+                <dt className="hf-caption">Internal notes</dt>
+                <dd className="mt-1 rounded-md border border-line bg-surface-muted px-3 py-2 text-ink-700">{detail.notes}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
+      </Drawer>
     </ModuleShell>
   )
 }

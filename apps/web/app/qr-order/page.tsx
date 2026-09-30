@@ -1,36 +1,50 @@
 'use client'
 
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { Minus, Plus, QrCode, ShoppingBag, Trash2, UtensilsCrossed } from 'lucide-react'
+import { ToastProvider, useToast } from '@/components/feedback/Toast'
+import Button from '@/components/ui/Button'
+import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Alert } from '@/components/ui/Alert'
+import { EmptyState } from '@/components/ui/States'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { apiRequest, getErrorMessage, responseData } from '@/lib/api'
+import { formatCurrency } from '@/lib/format'
 
 type Product = { id: string; name: string; code: string; price: number | string }
-type Menu = { id: string; outletId: string; name: string; categories?: { id: string; name: string; products?: Product[] }[] }
+type Menu = { id: string; outletId: string; name?: string; categories?: { id: string; name: string; products?: Product[] }[] }
+type QrTable = { outletId: string; outletName?: string; tableName?: string }
+type CartLine = { product: Product; quantity: number }
 
-export default function QROrderPage() {
+function QROrderExperience() {
+  const toast = useToast()
   const [token, setToken] = useState('')
-  const [table, setTable] = useState<any>(null)
+  const [table, setTable] = useState<QrTable | null>(null)
   const [menus, setMenus] = useState<Menu[]>([])
-  const [cart, setCart] = useState<Array<{ product: Product; quantity: number }>>([])
+  const [cart, setCart] = useState<CartLine[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
 
   const loadTable = useCallback(async () => {
     const queryToken = new URLSearchParams(window.location.search).get('token') || ''
     setToken(queryToken)
     if (!queryToken) {
-      setError('A QR order token is required.')
+      setError('A QR order token is required. Scan the code on your table to continue.')
       setLoading(false)
       return
     }
     setLoading(true)
     setError('')
     try {
-      const response = await apiRequest<any>(`/api/qr/lookup/${encodeURIComponent(queryToken)}`, {}, { auth: false })
+      const response = await apiRequest<QrTable>(`/api/qr/lookup/${encodeURIComponent(queryToken)}`, {}, { auth: false })
       setTable(response.data)
-      const menuResponse = await apiRequest<Menu[]>(`/api/menus?outletId=${encodeURIComponent(response.data.outletId)}`, {}, { auth: false })
+      const menuResponse = await apiRequest<Menu[]>(
+        `/api/menus?outletId=${encodeURIComponent(response.data.outletId)}`,
+        {},
+        { auth: false },
+      )
       setMenus(responseData(menuResponse))
     } catch (reason) {
       setError(getErrorMessage(reason, 'Invalid or expired QR code'))
@@ -39,43 +53,223 @@ export default function QROrderPage() {
     }
   }, [])
 
-  useEffect(() => { void loadTable() }, [loadTable])
+  useEffect(() => {
+    void loadTable()
+  }, [loadTable])
 
-  const products = menus.flatMap((menu) => menu.categories || []).flatMap((category) => category.products || [])
+  const grouped = useMemo(
+    () =>
+      menus
+        .flatMap((menu) => menu.categories || [])
+        .map((category) => ({
+          id: category.id,
+          name: category.name,
+          products: category.products || [],
+        }))
+        .filter((category) => category.products.length > 0),
+    [menus],
+  )
+
   const addToCart = (product: Product) => {
     setCart((current) => {
-      const existing = current.find((item) => item.product.id === product.id)
-      return existing ? current.map((item) => item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item) : [...current, { product, quantity: 1 }]
+      const existing = current.find((line) => line.product.id === product.id)
+      return existing
+        ? current.map((line) => (line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line))
+        : [...current, { product, quantity: 1 }]
     })
   }
-  const total = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0)
+
+  const changeQuantity = (productId: string, quantity: number) => {
+    setCart((current) =>
+      quantity <= 0
+        ? current.filter((line) => line.product.id !== productId)
+        : current.map((line) => (line.product.id === productId ? { ...line, quantity } : line)),
+    )
+  }
+
+  const total = cart.reduce((sum, line) => sum + Number(line.product.price) * line.quantity, 0)
+  const covers = cart.reduce((sum, line) => sum + line.quantity, 0)
 
   const submitOrder = async () => {
     if (!table || cart.length === 0) return
     setSaving(true)
     setError('')
     try {
-      await apiRequest('/api/qr/orders', { method: 'POST', body: JSON.stringify({ token, items: cart.map((item) => ({ productId: item.product.id, quantity: item.quantity })) }) }, { auth: false })
+      await apiRequest(
+        '/api/qr/orders',
+        { method: 'POST', body: JSON.stringify({ token, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })) }) },
+        { auth: false },
+      )
       setCart([])
-      setNotice('Order placed successfully.')
+      toast.success('Order placed', 'The kitchen has received your order.')
     } catch (reason) {
-      setError(getErrorMessage(reason, 'Unable to place QR order'))
+      const message = getErrorMessage(reason, 'Unable to place QR order')
+      setError(message)
+      toast.error('Order not placed', message)
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-hospiflow-50">
-      <header className="border-b border-hospiflow-200 bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8"><Link href="/dashboard" className="text-lg font-bold text-hospiflow-900">HOSPIFLOW</Link><span className="text-sm text-hospiflow-600">Guest ordering</span></div></header>
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="mb-1 text-2xl font-bold text-hospiflow-900">QR Ordering</h1><p className="mb-5 text-sm text-hospiflow-600">Guest self-service menu and order placement</p>
-      {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
-      {notice && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">{notice}</div>}
-      {loading ? <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-hospiflow-200 bg-white text-hospiflow-600">Loading menu...</div> : !table ? <div className="rounded-lg border border-dashed border-hospiflow-300 bg-white p-10 text-center text-hospiflow-600">Scan a QR code or open a QR order link to view the menu.</div> : (
-        <div className="grid gap-6 lg:grid-cols-3"><section className="lg:col-span-2 rounded-lg border border-hospiflow-200 bg-white p-5"><div className="mb-4"><h2 className="text-xl font-semibold">Menu · {table.outletName}</h2><p className="text-sm text-hospiflow-600">Table {table.tableName}</p></div><div className="grid gap-3 sm:grid-cols-2">{products.map((product) => <button key={product.id} onClick={() => addToCart(product)} className="rounded-lg border border-hospiflow-200 p-4 text-left hover:border-primary-500"><p className="font-medium">{product.name}</p><p className="mt-1 text-sm text-hospiflow-600">KES {Number(product.price).toFixed(2)}</p></button>)}</div>{products.length === 0 && <p className="py-10 text-center text-hospiflow-600">No menu items are available.</p>}</section><aside className="rounded-lg border border-hospiflow-200 bg-white p-5"><h2 className="text-lg font-semibold">Your order</h2><div className="mt-4 space-y-3">{cart.length === 0 ? <p className="text-sm text-hospiflow-600">Select items from the menu.</p> : cart.map((item) => <div key={item.product.id} className="flex items-center justify-between gap-2"><span className="text-sm">{item.product.name}</span><span className="flex items-center gap-1"><button onClick={() => setCart((current) => current.map((entry) => entry.product.id === item.product.id ? { ...entry, quantity: Math.max(1, entry.quantity - 1) } : entry))}>−</button><span className="w-5 text-center">{item.quantity}</span><button onClick={() => setCart((current) => current.map((entry) => entry.product.id === item.product.id ? { ...entry, quantity: entry.quantity + 1 } : entry))}>+</button></span></div>)}</div><div className="mt-4 flex justify-between border-t border-hospiflow-200 pt-3 font-semibold"><span>Total</span><span>KES {total.toFixed(2)}</span></div><button disabled={saving || cart.length === 0} onClick={() => void submitOrder()} className="mt-4 w-full rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50">{saving ? 'Placing...' : 'Place order'}</button></aside></div>
-      )}
+    <div className="min-h-screen bg-canvas">
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-content items-center justify-between gap-3 px-4 py-3.5 sm:px-6 lg:px-8">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-600 text-white">
+              <UtensilsCrossed className="h-4 w-4" />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold tracking-[0.02em] text-ink-900">HOSPIFLOW</span>
+              <span className="block text-2xs text-ink-500">Guest ordering</span>
+            </span>
+          </Link>
+          {table ? (
+            <span className="rounded-md border border-line bg-surface-muted px-2.5 py-1.5 text-xs font-medium text-ink-700">
+              {table.outletName || 'Table service'} · {table.tableName || 'Table'}
+            </span>
+          ) : null}
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-content space-y-4 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <div>
+          <h1 className="hf-display">QR Ordering</h1>
+          <p className="mt-1 text-sm text-ink-500">Browse the menu and send your order straight to the kitchen.</p>
+        </div>
+
+        {error ? <Alert tone="danger" title="Ordering is unavailable">{error}</Alert> : null}
+
+        {loading ? (
+          <div className="grid gap-4 lg:grid-cols-3" role="status" aria-label="Loading menu">
+            <Skeleton className="h-96 rounded-lg lg:col-span-2" />
+            <Skeleton className="h-96 rounded-lg" />
+          </div>
+        ) : !table ? (
+          <Card>
+            <EmptyState
+              icon={<QrCode className="h-5 w-5" />}
+              title="Scan the QR code on your table"
+              description="Each table has a unique code that opens its menu. Scan it to start your order."
+            />
+          </Card>
+        ) : grouped.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={<UtensilsCrossed className="h-5 w-5" />}
+              title="No menu items are available"
+              description="This outlet has not published any products yet. Please contact your server."
+            />
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle description={`${table.outletName || 'Menu'} · Table ${table.tableName || ''}`}>Menu</CardTitle>
+              </CardHeader>
+              <CardBody className="space-y-5">
+                {grouped.map((category) => (
+                  <section key={category.id} aria-labelledby={`qr-${category.id}`}>
+                    <h2 id={`qr-${category.id}`} className="hf-overline mb-2">
+                      {category.name}
+                    </h2>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {category.products.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => addToCart(product)}
+                          className="flex items-center justify-between gap-3 rounded-md border border-line px-3.5 py-3 text-left transition-colors duration-150 hover:border-brand-300 hover:bg-brand-50 focus-visible:ring-2 focus-visible:ring-brand-500"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-ink-900">{product.name}</span>
+                            <span className="block text-xs text-ink-500">{product.code}</span>
+                          </span>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-brand-700">
+                            {formatCurrency(product.price)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </CardBody>
+            </Card>
+
+            <Card className="flex h-fit flex-col lg:sticky lg:top-6">
+              <CardHeader>
+                <CardTitle description={cart.length ? `${covers} items` : 'No items selected'}>Your order</CardTitle>
+                {cart.length > 0 ? (
+                  <Button variant="ghost" size="sm" onClick={() => setCart([])} leadingIcon={<Trash2 aria-hidden="true" className="h-4 w-4" />}>
+                    Clear
+                  </Button>
+                ) : null}
+              </CardHeader>
+              <CardBody className="flex-1">
+                {cart.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-ink-500">Select items from the menu to begin.</p>
+                ) : (
+                  <ul className="space-y-2.5">
+                    {cart.map((line) => (
+                      <li key={line.product.id} className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink-900">{line.product.name}</p>
+                          <p className="text-xs tabular-nums text-ink-500">{formatCurrency(line.product.price)}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Remove one ${line.product.name}`}
+                            onClick={() => changeQuantity(line.product.id, line.quantity - 1)}
+                          >
+                            <Minus aria-hidden="true" className="h-3.5 w-3.5" />
+                          </Button>
+                          <span className="w-6 text-center text-sm font-medium tabular-nums">{line.quantity}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Add one ${line.product.name}`}
+                            onClick={() => changeQuantity(line.product.id, line.quantity + 1)}
+                          >
+                            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardBody>
+              <div className="space-y-3 border-t border-line px-4 py-3.5 sm:px-5">
+                <div className="flex items-center justify-between text-base font-semibold text-ink-900">
+                  <span>Total</span>
+                  <span className="tabular-nums">{formatCurrency(total)}</span>
+                </div>
+                <Button
+                  className="w-full"
+                  size="lg"
+                  loading={saving}
+                  loadingLabel="Placing"
+                  disabled={cart.length === 0}
+                  onClick={() => void submitOrder()}
+                  leadingIcon={<ShoppingBag aria-hidden="true" className="h-4 w-4" />}
+                >
+                  Place order
+                </Button>
+                <p className="text-center text-xs text-ink-500">Ask your server if you need anything else.</p>
+              </div>
+            </Card>
+          </div>
+        )}
       </main>
     </div>
+  )
+}
+
+export default function QROrderPage() {
+  return (
+    <ToastProvider>
+      <QROrderExperience />
+    </ToastProvider>
   )
 }
