@@ -6,9 +6,11 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     env: {
-      DATABASE_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
-      DATABASE_TEST_URL: 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
+      DATABASE_URL: process.env.DATABASE_TEST_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
+      DATABASE_TEST_URL: process.env.DATABASE_TEST_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
       NODE_ENV: 'test',
+      RATE_LIMIT_WINDOW_MS: '900000',
+      RATE_LIMIT_MAX: '100000',
       PAYMENT_PROVIDER: 'mock',
       JWT_SECRET: 'test-jwt-secret-key-for-integration-tests-only',
       JWT_REFRESH_SECRET: 'test-refresh-secret-key-for-integration-tests-only',

@@ -1,4 +1,5 @@
-const TEST_DB_URL = 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow'
+const TEST_DB_URL =
+  process.env.DATABASE_TEST_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow'
 
 export { TEST_DB_URL }
 

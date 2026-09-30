@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import request from 'supertest'
-import { getApp, setupTestDatabase, getSeedData, disconnect } from './helpers/app'
+import { getApp, setupTestDatabase, getSeedData, getPrisma, disconnect } from './helpers/app'
 import { login, authHeaders, AuthTokens } from './helpers/auth'
 import { Express } from 'express'
 
@@ -157,7 +157,16 @@ describe('Tenant Isolation Integration Tests', () => {
       .expect(200)
 
     const items = res.body.data
-    expect(items.length).toBe(0)
+    expect(items.every((i: any) => i.organizationId === seedData.orgA.organizationId)).toBe(true)
+    expect(items.length).toBeGreaterThan(0)
+
+    const orgBList = await request(app)
+      .get('/api/inventory')
+      .set(authHeaders(orgBAdminTokens))
+      .expect(200)
+
+    const orgAIds = items.map((i: any) => i.id)
+    expect(orgBList.body.data.every((i: any) => !orgAIds.includes(i.id))).toBe(true)
   })
 
   it('Org A user cannot update Org B property', async () => {
@@ -198,5 +207,148 @@ describe('Tenant Isolation Integration Tests', () => {
 
     const intersection = roomIdsA.filter((id: string) => roomIdsB.includes(id))
     expect(intersection.length).toBe(0)
+  })
+})
+
+describe('Inventory Stock Movement Tenant Isolation', () => {
+  let orgAAdminTokens: AuthTokens
+  let orgBAdminTokens: AuthTokens
+  let orgAItemId: string
+  let orgBItemId: string
+  let orgBMovementId: string
+  let orgAMovementId: string
+
+  beforeAll(async () => {
+    orgAAdminTokens = await login(app, seedData.orgA.users.ORG_ADMIN.email, seedData.orgA.users.ORG_ADMIN.password)
+    orgBAdminTokens = await login(app, seedData.orgB.users.ORG_ADMIN.email, seedData.orgB.users.ORG_ADMIN.password)
+
+    const prisma = await getPrisma()
+
+    orgAItemId = seedData.orgA.inventoryItemId
+
+    const orgBItem = await prisma.inventoryItem.create({
+      data: {
+        organizationId: seedData.orgB.organizationId,
+        name: 'Org B Secret Ingredient',
+        sku: 'TENANT-ISO-B-SKU',
+        category: 'Secret',
+        unit: 'kg',
+        unitCost: 99.99,
+      },
+    })
+    orgBItemId = orgBItem.id
+
+    const orgBMovement = await prisma.stockMovement.create({
+      data: {
+        inventoryItemId: orgBItemId,
+        type: 'PURCHASE',
+        quantity: 4242,
+        unitCost: 99.99,
+        reference: 'org-b-secret-reference',
+      },
+    })
+    orgBMovementId = orgBMovement.id
+
+    const orgAMovement = await prisma.stockMovement.findFirstOrThrow({
+      where: { inventoryItemId: orgAItemId },
+    })
+    orgAMovementId = orgAMovement.id
+  }, 60000)
+
+  it('Org A user sees their own stock movements', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .set(authHeaders(orgAAdminTokens))
+      .expect(200)
+
+    const movementIds = res.body.data.map((m: any) => m.id)
+    expect(movementIds).toContain(orgAMovementId)
+  })
+
+  it('Org B user sees their own stock movements', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .set(authHeaders(orgBAdminTokens))
+      .expect(200)
+
+    const movementIds = res.body.data.map((m: any) => m.id)
+    expect(movementIds).toContain(orgBMovementId)
+  })
+
+  it('Org A user cannot see Org B stock movements', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .set(authHeaders(orgAAdminTokens))
+      .expect(200)
+
+    const movements = res.body.data
+    const movementIds = movements.map((m: any) => m.id)
+    expect(movementIds).not.toContain(orgBMovementId)
+
+    const leaked = movements.find((m: any) => m.inventoryItemId === orgBItemId)
+    expect(leaked).toBeUndefined()
+    expect(JSON.stringify(movements)).not.toContain('org-b-secret-reference')
+  })
+
+  it('Org B user cannot see Org A stock movements', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .set(authHeaders(orgBAdminTokens))
+      .expect(200)
+
+    const movements = res.body.data
+    const movementIds = movements.map((m: any) => m.id)
+    expect(movementIds).not.toContain(orgAMovementId)
+
+    const leaked = movements.find((m: any) => m.inventoryItemId === orgAItemId)
+    expect(leaked).toBeUndefined()
+  })
+
+  it('Client-supplied organizationId cannot widen inventory movement scope', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .query({ organizationId: seedData.orgB.organizationId, limit: 200 })
+      .set(authHeaders(orgAAdminTokens))
+      .expect(200)
+
+    const movements = res.body.data
+    expect(movements.map((m: any) => m.id)).not.toContain(orgBMovementId)
+    expect(movements.every((m: any) => m.inventoryItemId !== orgBItemId)).toBe(true)
+  })
+
+  it('Filtering by another tenant itemId returns no cross-tenant movement', async () => {
+    const res = await request(app)
+      .get('/api/inventory/movements')
+      .query({ itemId: orgBItemId })
+      .set(authHeaders(orgAAdminTokens))
+      .expect(200)
+
+    expect(res.body.data).toEqual([])
+    expect(res.body.data.length).toBe(0)
+  })
+
+  it('Client-supplied organizationId cannot widen inventory item scope', async () => {
+    const res = await request(app)
+      .get('/api/inventory')
+      .query({ organizationId: seedData.orgB.organizationId, limit: 200 })
+      .set(authHeaders(orgAAdminTokens))
+      .expect(200)
+
+    const itemIds = res.body.data.map((i: any) => i.id)
+    expect(itemIds).not.toContain(orgBItemId)
+  })
+
+  it('Org A user cannot create a stock movement against an Org B inventory item', async () => {
+    const res = await request(app)
+      .post('/api/inventory/movements')
+      .set(authHeaders(orgAAdminTokens))
+      .send({ inventoryItemId: orgBItemId, type: 'ADJUSTMENT', quantity: 5 })
+
+    expect(res.status).toBe(404)
+    expect(res.body.success).toBe(false)
+
+    const prisma = await getPrisma()
+    const created = await prisma.stockMovement.findMany({ where: { inventoryItemId: orgBItemId } })
+    expect(created.map((m: any) => m.id)).toEqual([orgBMovementId])
   })
 })

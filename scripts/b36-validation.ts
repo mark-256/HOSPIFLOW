@@ -5,12 +5,20 @@
 import { writeFileSync } from 'fs'
 
 const API = 'http://localhost:3001'
-const EMAIL = 'admin@hospiflow.com'
-const PASSWORD = 'admin123'
+const EMAIL = process.env.B36_EMAIL || 'admin@hospiflow.com'
+const PASSWORD = process.env.B36_PASSWORD || 'admin123'
+const DB_URL =
+  process.env.DATABASE_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow'
 
-const PROPERTY_ID = 'cmu4p51mf0002o3p1newxewmm'
-const ORG_ID = 'cmu4p51l70000o3p1gqgvz2jk'
-const ROLE_ID = 'cmu4p51np0006o3p1k69ux0ta'
+/**
+ * Tenant identifiers are discovered dynamically from the authenticated session
+ * instead of being hardcoded, so the suite stays bound to whichever seeded
+ * environment is currently active. They are populated by discoverFixtures()
+ * immediately after login succeeds.
+ */
+let PROPERTY_ID = ''
+let ORG_ID = ''
+let ROLE_ID = ''
 
 interface TestResult {
   id: string
@@ -73,6 +81,45 @@ async function login(): Promise<string | null> {
   }
   console.error('Login failed:', JSON.stringify(r.data))
   return null
+}
+
+/**
+ * Resolves the organization, property and role identifiers that the rest of the
+ * suite depends on from the authenticated session, so no fixture ID is ever
+ * hardcoded. Every value comes from the server via the caller's own token,
+ * which also guarantees the identifiers belong to the caller's tenant.
+ */
+async function discoverFixtures(token: string): Promise<void> {
+  const user = testData.user
+  ORG_ID = user?.organization?.id || ''
+
+  const propsRes = await request('/api/properties', {}, token)
+  const props = propsRes.ok ? propsRes.data?.data : null
+  if (Array.isArray(props) && props.length > 0) {
+    const match = props.find((p: any) => p.organizationId === ORG_ID) || props[0]
+    PROPERTY_ID = match.id
+  }
+
+  const usersRes = await request('/api/users', {}, token)
+  const users = usersRes.ok ? usersRes.data?.data : null
+  if (Array.isArray(users)) {
+    const me = users.find((u: any) => u.email === EMAIL) || users.find((u: any) => u.id === user?.id)
+    ROLE_ID = me?.roleId || ''
+  }
+
+  if (!PROPERTY_ID || !ORG_ID || !ROLE_ID) {
+    throw new Error(
+      `Fixture discovery failed (property=${PROPERTY_ID || 'missing'}, org=${ORG_ID || 'missing'}, role=${ROLE_ID || 'missing'}). ` +
+        'Run `npm run db:seed` to create the deterministic validation environment.'
+    )
+  }
+
+  testData.propertyId = PROPERTY_ID
+  testData.orgId = ORG_ID
+  testData.roleId = ROLE_ID
+  console.log(
+    `Fixtures discovered — org=${ORG_ID} property=${PROPERTY_ID} role=${ROLE_ID}\n`
+  )
 }
 
 async function main() {
@@ -163,7 +210,10 @@ async function main() {
   }
 
   // Re-login for subsequent tests
-  testData.token = await login() || testData.token
+  testData.token = (await login()) || testData.token
+
+  // Resolve the org/property/role fixtures from the authenticated session
+  await discoverFixtures(testData.token)
 
   // =====================================================
   // B36.3 — AUTHORIZATION
@@ -1930,20 +1980,38 @@ async function main() {
 }
 
 async function runSQL(sql: string): Promise<string | null> {
-  try {
-    const { execSync } = await import('child_process')
-    const fs = await import('fs')
-    const tmpFile = `/tmp/b36_sql_${Date.now()}.sql`
-    fs.writeFileSync(tmpFile, sql)
-    const result = execSync(
-      `docker cp ${tmpFile} hospiflow-postgres-1:/tmp/b36_sql.sql && docker exec hospiflow-postgres-1 psql -U hospiflow -d hospiflow -t -A -q -f /tmp/b36_sql.sql 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim().split('\n')[0].trim()
-    fs.unlinkSync(tmpFile)
-    return result || null
-  } catch (e) {
-    return null
+  const fs = await import('fs')
+  const { execSync } = await import('child_process')
+  const tmpFile = `/tmp/b36_sql_${Date.now()}.sql`
+  fs.writeFileSync(tmpFile, sql)
+
+  const run = (cmd: string) =>
+    execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .trim()
+      .split('\n')[0]
+      .trim()
+
+  const attempts: string[] = [
+    `docker cp ${tmpFile} hospiflow-postgres-1:/tmp/b36_sql.sql && docker exec hospiflow-postgres-1 psql -U hospiflow -d hospiflow -t -A -q -v ON_ERROR_STOP=1 -f /tmp/b36_sql.sql 2>/dev/null`,
+    `psql '${DB_URL}' -t -A -q -v ON_ERROR_STOP=1 -f ${tmpFile}`,
+  ]
+
+  let lastError: unknown = null
+  for (const cmd of attempts) {
+    try {
+      const out = run(cmd)
+      if (out) {
+        fs.unlinkSync(tmpFile)
+        return out
+      }
+    } catch (e) {
+      lastError = e
+    }
   }
+
+  fs.unlinkSync(tmpFile)
+  console.error(`runSQL failed: ${String(lastError)}`)
+  return null
 }
 
 main().catch(err => {

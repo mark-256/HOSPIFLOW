@@ -6,8 +6,8 @@ const prisma = new PrismaClient()
 
 export const inventoryController = {
   list: async (req: AuthenticatedRequest, res: Response) => {
-    const { organizationId, category, search, page, limit } = req.query
-    const where: any = { organizationId: String(organizationId || req.user!.organizationId) }
+    const { category, search } = req.query
+    const where: any = { organizationId: req.user!.organizationId }
     if (category) where.category = String(category)
     if (search) where.name = { contains: String(search), mode: 'insensitive' }
     const { page: p, limit: l, skip } = (await import('../utils/pagination.js')).parsePagination(req.query as Record<string, unknown>)
@@ -30,8 +30,8 @@ export const inventoryController = {
   },
 
   movements: async (req: AuthenticatedRequest, res: Response) => {
-    const { itemId, page, limit } = req.query
-    const where: any = {}
+    const { itemId } = req.query
+    const where: any = { inventoryItem: { organizationId: req.user!.organizationId } }
     if (itemId) where.inventoryItemId = String(itemId)
     const { page: p, limit: l, skip } = (await import('../utils/pagination.js')).parsePagination(req.query as Record<string, unknown>)
     const [movements, total] = await Promise.all([
@@ -51,7 +51,14 @@ export const inventoryController = {
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Quantity must be a positive number' } })
     }
-    const movement = await prisma.stockMovement.create({ data: { inventoryItemId, type: type as StockMovementType, quantity: parsedQuantity, unitCost: unitCost ? parseFloat(unitCost) : null, reference, batchNumber, expiryDate: expiryDate ? new Date(expiryDate) : undefined, notes, createdBy: req.user?.id } })
+    const item = await prisma.inventoryItem.findFirst({
+      where: { id: String(inventoryItemId), organizationId: req.user!.organizationId },
+      select: { id: true },
+    })
+    if (!item) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Inventory item not found' } })
+    }
+    const movement = await prisma.stockMovement.create({ data: { inventoryItemId: item.id, type: type as StockMovementType, quantity: parsedQuantity, unitCost: unitCost ? parseFloat(unitCost) : null, reference, batchNumber, expiryDate: expiryDate ? new Date(expiryDate) : undefined, notes, createdBy: req.user?.id } })
     return res.status(201).json({ success: true, data: movement })
   },
 }
