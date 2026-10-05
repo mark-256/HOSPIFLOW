@@ -1,16 +1,24 @@
 import { Request, Response } from 'express'
 import { PrismaClient, OrderStatus, OrderType, PaymentMethod, PaymentStatus, PaymentProvider } from '@hospiflow/database'
 import { AuthenticatedRequest } from '../middleware/auth'
+import { BadRequestError } from '../utils/errors'
+import {
+  MAX_MONEY_10_2,
+  assertPaymentMethod,
+  assertPaymentProvider,
+  parseMonetaryAmount,
+  recordOrderCollection,
+} from '../services/financialIntegrity'
 
 const prisma = new PrismaClient()
 
 function toDecimal(value: unknown): number {
-  const num = typeof value === 'number' ? value : parseFloat(String(value))
-  if (!Number.isFinite(num) || num < 0) {
-    throw new Error('Invalid monetary value')
-  }
-  return Math.round(num * 100) / 100
+  // A hostile monetary value is a client error, never an unhandled 500.
+  return parseMonetaryAmount(value, { field: 'amount', max: MAX_MONEY_10_2 })
 }
+
+/** Order statuses that can no longer collect or release money. */
+const NON_COLLECTABLE_ORDER_STATUSES: string[] = [OrderStatus.CANCELLED]
 
 export const ordersController = {
    list: async (req: AuthenticatedRequest, res: Response) => {
@@ -38,6 +46,18 @@ export const ordersController = {
     }
     const outlet = await prisma.outlet.findFirst({ where: { id: outletId, property: { organizationId: req.user!.organizationId } } })
     if (!outlet) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Outlet not found' } })
+    let validatedTableId: string | undefined
+    if (tableId) {
+      const table = await prisma.table.findFirst({ where: { id: String(tableId), outletId: outlet.id } })
+      if (!table) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Table not found for this outlet' } })
+      validatedTableId = table.id
+    }
+    let validatedGuestId: string | undefined
+    if (guestId) {
+      const guest = await prisma.guest.findFirst({ where: { id: String(guestId), property: { organizationId: req.user!.organizationId } } })
+      if (!guest) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
+      validatedGuestId = guest.id
+    }
     if (idempotencyKey) {
       const existing = await prisma.order.findFirst({
         where: {
@@ -53,10 +73,10 @@ export const ordersController = {
     const order = await prisma.order.create({
       data: {
         outletId,
-        tableId,
+        tableId: validatedTableId,
         orderNumber,
         orderType: orderType as OrderType,
-        guestId,
+        guestId: validatedGuestId,
         customerName,
         customerPhone,
         roomNumber,
@@ -121,9 +141,14 @@ export const ordersController = {
         const recipe = await prisma.recipe.findUnique({ where: { productId: item.productId }, include: { ingredients: true } })
         if (recipe && recipe.ingredients.length > 0) {
           for (const ingredient of recipe.ingredients) {
+            const inventoryItem = await prisma.inventoryItem.findFirst({
+              where: { id: ingredient.inventoryItemId, organizationId: req.user!.organizationId },
+              select: { id: true },
+            })
+            if (!inventoryItem) continue
             await prisma.stockMovement.create({
               data: {
-                inventoryItemId: ingredient.inventoryItemId,
+                inventoryItemId: inventoryItem.id,
                 productId: item.productId,
                 orderId: order.id,
                 type: 'SALE',
@@ -180,54 +205,98 @@ export const ordersController = {
   },
 
   addItem: async (req: AuthenticatedRequest, res: Response) => {
-    const { productId, productName, productCode, quantity, unitPrice, notes } = req.body
+    const { productId, quantity, notes } = req.body ?? {}
     const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { outlet: { select: { property: { select: { organizationId: true } } } } } })
     if (!order || order.outlet.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
     if (!productId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Product ID is required' } })
     }
-    const product = await prisma.product.findUnique({ where: { id: productId } })
-    if (!product) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Product not found' } })
-    const authoritativePrice = toDecimal(product.price)
-    const clientPrice = unitPrice !== undefined ? toDecimal(unitPrice) : null
-    const finalUnitPrice = clientPrice !== null ? Math.min(clientPrice, authoritativePrice) : authoritativePrice
-    const qty = Math.max(1, Math.floor(Number(quantity)))
-    const total = Math.round(finalUnitPrice * qty * 100) / 100
-    const item = await prisma.orderItem.create({ data: { orderId: order.id, productId, productName: product.name, productCode: product.code, quantity: qty, unitPrice: finalUnitPrice, total, notes } })
+    const parsedQuantity = Number(quantity)
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity < 1) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Quantity must be a positive number' } })
+    }
+    const product = await prisma.product.findFirst({
+      where: {
+        id: String(productId),
+        menuCategory: { menu: { outletId: order.outletId } },
+      },
+    })
+    if (!product) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Product not found for this outlet' } })
+    // B36 rule, strengthened by B40: the price is the authoritative product price.
+    // A client-supplied unitPrice is never allowed to lower it, because a lowered
+    // price lowers the order total, the balance and therefore the amount the
+    // server will later accept as payment. Discounts are a separate, authorised
+    // operation (order discount / discountEngine), not a field on an add-item
+    // request.
+    const authoritativePrice = Number(product.price)
+    const qty = Math.max(1, Math.floor(parsedQuantity))
+    const total = Math.round(authoritativePrice * qty * 100) / 100
+    const item = await prisma.orderItem.create({ data: { orderId: order.id, productId: product.id, productName: product.name, productCode: product.code, quantity: qty, unitPrice: authoritativePrice, total, notes } })
     await prisma.order.update({ where: { id: order.id }, data: { subtotal: { increment: total }, total: { increment: total }, balance: { increment: total } } })
     return res.status(201).json({ success: true, data: item })
   },
 
   pay: async (req: AuthenticatedRequest, res: Response) => {
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined
-    const { paymentMethod, amount, reference, provider } = req.body
+    const { paymentMethod, amount, reference, provider } = req.body ?? {}
     const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { outlet: { select: { property: { select: { organizationId: true } } } } } })
     if (!order || order.outlet.property.organizationId !== req.user!.organizationId) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } })
+
+    // Enum and amount validation happen before any write so an invalid value is a
+    // 4xx client error rather than a database exception.
+    const validatedMethod = assertPaymentMethod(paymentMethod) as PaymentMethod
+    const validatedProvider = provider === undefined || provider === null ? undefined : (assertPaymentProvider(provider) as PaymentProvider)
     const amountNum = toDecimal(amount)
+
     if (idempotencyKey) {
       const existing = await prisma.orderPayment.findFirst({ where: { orderId: order.id, reference: idempotencyKey } })
       if (existing) {
+        // Reusing one key for a materially different request must not silently
+        // replay the first charge.
+        if (Math.round(Number(existing.amount) * 100) !== Math.round(amountNum * 100)) {
+          throw new BadRequestError('Idempotency-Key has already been used for a different amount')
+        }
+        if (existing.paymentMethod !== validatedMethod) {
+          throw new BadRequestError('Idempotency-Key has already been used for a different payment method')
+        }
         return res.status(200).json({ success: true, data: existing, meta: { deduplicated: true } })
       }
     }
+
+    // A cancelled order cannot collect money.
+    if (NON_COLLECTABLE_ORDER_STATUSES.includes(String(order.status))) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: `Cannot collect payment on a ${order.status} order` } })
+    }
+
     const balance = Math.round(Number(order.balance) * 100) / 100
     if (amountNum > balance) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Amount exceeds balance' } })
     }
-    const payment = await prisma.orderPayment.create({
-      data: {
-        orderId: order.id,
-        paymentMethod: paymentMethod as PaymentMethod,
-        amount: amountNum,
-        reference: reference || idempotencyKey || undefined,
-        provider: provider as PaymentProvider | undefined,
-        status: PaymentStatus.COMPLETED,
-        paidAt: new Date(),
-      },
+
+    // The payment row and the order ledger must move together, and the ledger
+    // update is guarded by the authoritative remaining balance so concurrent
+    // requests can never both collect the same money.
+    const payment = await prisma.$transaction(async (tx) => {
+      const created = await tx.orderPayment.create({
+        data: {
+          orderId: order.id,
+          paymentMethod: validatedMethod,
+          amount: amountNum,
+          reference: reference || idempotencyKey || undefined,
+          provider: validatedProvider,
+          status: PaymentStatus.COMPLETED,
+          paidAt: new Date(),
+        },
+      })
+
+      const applied = await recordOrderCollection(tx as unknown as PrismaClient, order.id, amountNum)
+      if (!applied) {
+        throw new BadRequestError('Amount exceeds balance')
+      }
+
+      return created
     })
-    const newPaidAmount = Math.round((Number(order.paidAmount) + amountNum) * 100) / 100
-    const newBalance = Math.round((Number(order.total) - newPaidAmount) * 100) / 100
-    await prisma.order.update({ where: { id: order.id }, data: { paidAmount: newPaidAmount, balance: newBalance } })
+
     await prisma.auditLog.create({
       data: {
         organizationId: req.user!.organizationId,
@@ -237,6 +306,12 @@ export const ordersController = {
         entityId: payment.id,
         ip: req.ip || undefined,
         userAgent: req.headers['user-agent'] || undefined,
+        metadata: {
+          method: validatedMethod,
+          provider: validatedProvider ?? null,
+          amount: amountNum.toFixed(2),
+          orderId: order.id,
+        },
       },
     })
     return res.status(201).json({ success: true, data: payment })

@@ -55,6 +55,20 @@ const limiter = rateLimit({
 })
 app.use('/api/', limiter)
 
+/**
+ * Credential-stuffing protection. Kept separate from the global API limiter so
+ * that raising the general request budget (which the validation suites need)
+ * can never weaken protection on the login endpoint.
+ */
+const authLimiter = rateLimit({
+  windowMs: config.authRateLimitWindowMs,
+  max: config.authRateLimitMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+})
+app.use('/api/auth/login', authLimiter)
+
 app.get('/health', healthRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', usersRoutes)

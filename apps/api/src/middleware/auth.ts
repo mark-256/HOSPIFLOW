@@ -35,8 +35,8 @@ export async function authMiddleware(req: AuthenticatedRequest, res: Response, n
       organizationId: string
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
+    const user = await prisma.user.findFirst({
+      where: { id: payload.userId, deletedAt: null },
       include: { role: true },
     })
 

@@ -1,13 +1,30 @@
 import { defineConfig } from 'vitest/config'
 
+const testDbUrl = process.env.DATABASE_TEST_URL
+
+if (!testDbUrl) {
+  console.error(`
+TEST DATABASE CONFIGURATION ERROR:
+DATABASE_TEST_URL is not configured.
+Refusing to run destructive integration tests against DATABASE_URL.
+
+Set DATABASE_TEST_URL to a dedicated test database, e.g.:
+  export DATABASE_TEST_URL="postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow_test"
+
+Then initialize the test database:
+  scripts/setup-test-db.sh
+`)
+  process.exit(1)
+}
+
 export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    setupFiles: ['./tests/integration/helpers/testSetup.ts'],
     env: {
-      DATABASE_URL: process.env.DATABASE_TEST_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
-      DATABASE_TEST_URL: process.env.DATABASE_TEST_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow',
+      DATABASE_TEST_URL: testDbUrl,
       NODE_ENV: 'test',
       RATE_LIMIT_WINDOW_MS: '900000',
       RATE_LIMIT_MAX: '100000',

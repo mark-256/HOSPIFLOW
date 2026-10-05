@@ -2,11 +2,8 @@ import { Router, Request, Response } from 'express'
 import { authMiddleware, requirePermission } from '../middleware/auth'
 import { paymentService } from '../services/paymentService'
 import { PaymentProviderFactory } from '../services/payments'
+import { applyProviderWebhook, verifyWebhookSecret, webhookErrorResponse } from '../services/paymentWebhookService'
 import { asyncHandler } from '../utils/asyncHandler'
-
-import { PrismaClient } from '@hospiflow/database'
-
-const prisma = new PrismaClient()
 
 const router = Router()
 const factory = PaymentProviderFactory.getInstance()
@@ -20,6 +17,15 @@ router.post('/verify', asyncHandler(paymentService.verifyPayment))
 router.use('/refund', authMiddleware, requirePermission('payments_refund'))
 router.post('/refund', asyncHandler(paymentService.refundPayment))
 
+router.use('/bank/submit', authMiddleware, requirePermission('payments_process'))
+router.post('/bank/submit', asyncHandler(paymentService.submitBankPayment))
+
+router.use('/bank/verify', authMiddleware, requirePermission('finance_edit'))
+router.post('/bank/verify', asyncHandler(paymentService.verifyBankPayment))
+
+router.use('/bank/reject', authMiddleware, requirePermission('finance_edit'))
+router.post('/bank/reject', asyncHandler(paymentService.rejectBankPayment))
+
 router.get('/', authMiddleware, requirePermission('payments_process'), asyncHandler(paymentService.listPayments))
 router.get('/:id', authMiddleware, requirePermission('payments_process'), asyncHandler(paymentService.getPayment))
 router.patch('/:id', authMiddleware, requirePermission('payments_process'), (_req: Request, res: Response) => {
@@ -31,98 +37,26 @@ router.delete('/:id', authMiddleware, requirePermission('payments_process'), (_r
 
 router.post('/webhook/mpesa', asyncHandler(async (req: Request, res: Response) => {
   try {
+    if (!verifyWebhookSecret(req.headers['x-hospiflow-webhook-secret'] as string | undefined, 'M-Pesa')) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid webhook credentials' } })
+    }
     const adapter = factory.getProvider('MPESA')
     const response = await adapter.handleWebhook(req.body)
-
-    if (!response) {
-      return res.status(200).json({ success: true, message: 'Webhook received but no action taken' })
-    }
-
-    const payment = await prisma.orderPayment.findFirst({
-      where: { id: response.id },
-      include: { order: true },
-    })
-
-    if (!payment) {
-      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Payment not found' } })
-    }
-
-    const updateData: any = {
-      reference: response.reference || payment.reference,
-      metadata: {
-        ...(typeof payment.metadata === 'object' && payment.metadata !== null ? payment.metadata : {}),
-        webhookProcessedAt: new Date().toISOString(),
-        providerResponse: response,
-      },
-    }
-
-    if (response.status === 'SUCCEEDED') {
-      updateData.status = 'COMPLETED'
-      updateData.paidAt = new Date()
-    } else if (response.status === 'FAILED') {
-      updateData.status = 'FAILED'
-    } else if (response.status === 'CANCELLED') {
-      updateData.status = 'CANCELLED'
-    }
-
-    await prisma.orderPayment.update({
-      where: { id: payment.id },
-      data: updateData,
-    })
-
-    return res.status(200).json({ success: true })
+    const result = await applyProviderWebhook('M-Pesa', response)
+    return res.status(result.status).json(result.body)
   } catch (error) {
-    console.error('M-Pesa webhook error:', error)
-    return res.status(400).json({ success: false, error: { code: 'WEBHOOK_ERROR', message: 'Invalid M-Pesa callback' } })
+    return webhookErrorResponse(res, 'M-Pesa', error)
   }
 }))
 
 router.post('/webhook/stripe', asyncHandler(async (req: Request, res: Response) => {
   try {
-    const signature = req.headers['stripe-signature'] as string | undefined
     const adapter = factory.getProvider('STRIPE')
-    const response = await adapter.handleWebhook(req.body, signature)
-
-    if (!response) {
-      return res.status(200).json({ success: true, message: 'Webhook received but no action taken' })
-    }
-
-    const payment = await prisma.orderPayment.findFirst({
-      where: { id: response.id },
-      include: { order: true },
-    })
-
-    if (!payment) {
-      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Payment not found' } })
-    }
-
-    const updateData: any = {
-      reference: response.reference || payment.reference,
-      metadata: {
-        ...(typeof payment.metadata === 'object' && payment.metadata !== null ? payment.metadata : {}),
-        webhookProcessedAt: new Date().toISOString(),
-        providerResponse: response,
-      },
-    }
-
-    if (response.status === 'SUCCEEDED') {
-      updateData.status = 'COMPLETED'
-      updateData.paidAt = new Date()
-    } else if (response.status === 'FAILED') {
-      updateData.status = 'FAILED'
-    } else if (response.status === 'CANCELLED') {
-      updateData.status = 'CANCELLED'
-    }
-
-    await prisma.orderPayment.update({
-      where: { id: payment.id },
-      data: updateData,
-    })
-
-    return res.status(200).json({ success: true })
+    const response = await adapter.handleWebhook(req.body, req.headers['stripe-signature'] as string | undefined)
+    const result = await applyProviderWebhook('Stripe', response)
+    return res.status(result.status).json(result.body)
   } catch (error) {
-    console.error('Stripe webhook error:', error)
-    return res.status(400).json({ success: false, error: { code: 'WEBHOOK_ERROR', message: 'Invalid Stripe webhook' } })
+    return webhookErrorResponse(res, 'Stripe', error)
   }
 }))
 

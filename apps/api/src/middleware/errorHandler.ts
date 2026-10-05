@@ -40,6 +40,27 @@ export function errorHandler(
     })
   }
 
+  // A malformed request body must be a client error, not an unhandled 500.
+  if (err.name === 'SyntaxError' && 'body' in err) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Request body must be valid JSON',
+      },
+    })
+  }
+
+  if (err.name === 'PrismaClientValidationError' || err.name === 'PrismaClientKnownRequestError') {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request contains a value that is not valid for this resource',
+      },
+    })
+  }
+
   if (err.name === 'TokenExpiredError') {
     return res.status(401).json({
       success: false,

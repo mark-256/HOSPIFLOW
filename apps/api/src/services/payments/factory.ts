@@ -2,12 +2,13 @@ import { PaymentProviderAdapter } from './types'
 import { MpesaProvider } from './mpesa'
 import { StripeProvider } from './stripe'
 import { MockProvider } from './mock'
+import { BankProvider } from './bank'
 import { config } from '../../config'
 
-export type ProviderKind = 'MPESA' | 'STRIPE' | 'MOCK'
+export type ProviderKind = 'MPESA' | 'STRIPE' | 'MOCK' | 'BANK'
 
 const PROVIDER_ENV = (process.env.PAYMENT_PROVIDER || 'mock').toUpperCase() as ProviderKind
-const ALLOWED_PROVIDERS: ProviderKind[] = ['MPESA', 'STRIPE', 'MOCK']
+const ALLOWED_PROVIDERS: ProviderKind[] = ['MPESA', 'STRIPE', 'MOCK', 'BANK']
 
 function validateEnvironment(kind: ProviderKind): void {
   if (config.nodeEnv === 'production' || config.nodeEnv === 'staging') {
@@ -33,6 +34,11 @@ function validateEnvironment(kind: ProviderKind): void {
     if (kind === 'MOCK') {
       throw new Error('MOCK payment provider is not allowed in production')
     }
+
+    if (kind === 'BANK') {
+      // Bank transfers require no external service credentials, so nothing to
+      // validate beyond the provider being intentionally selected.
+    }
   }
 }
 
@@ -57,6 +63,10 @@ export class PaymentProviderFactory {
     }
 
     validateEnvironment(PROVIDER_ENV)
+
+    // The bank provider is always available — it has no external service
+    // dependency and is verified manually through the finance workflow.
+    this.providers.set('BANK', new BankProvider())
 
     switch (PROVIDER_ENV) {
       case 'MPESA':

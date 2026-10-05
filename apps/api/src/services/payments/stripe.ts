@@ -2,6 +2,9 @@ import { PaymentProviderAdapter, PaymentRequest, PaymentResponse, RefundRequest,
 import { config } from '../../config'
 import crypto from 'crypto'
 
+/** Stripe's documented replay window for webhook signatures. */
+const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300
+
 export class StripeProvider implements PaymentProviderAdapter {
   name = 'STRIPE' as const
   private readonly apiBase = 'https://api.stripe.com/v1'
@@ -159,11 +162,7 @@ export class StripeProvider implements PaymentProviderAdapter {
     }
 
     const rawPayload = typeof payload === 'string' ? payload : JSON.stringify(payload)
-    const expectedSignature = this.computeSignature(rawPayload, config.stripeWebhookSecret)
-
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-      throw new Error('Invalid Stripe webhook signature')
-    }
+    this.assertValidSignature(rawPayload, signature)
 
     const event = JSON.parse(rawPayload) as {
       type: string
@@ -225,7 +224,61 @@ export class StripeProvider implements PaymentProviderAdapter {
     return statusMap[stripeStatus] || 'PENDING'
   }
 
-  private computeSignature(payload: string, secret: string): string {
-    return crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+  /**
+   * Verifies the `Stripe-Signature` header exactly as Stripe documents it:
+   * `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw payload>">`, with one or
+   * more `v1` values while a secret is being rotated.
+   *
+   * B40: the previous implementation compared the header against a bare HMAC of
+   * the payload with no timestamp, which is not the scheme Stripe signs with (so
+   * genuine Stripe deliveries could never validate) and provided no replay
+   * window. The timestamp tolerance is what makes a captured delivery expire.
+   */
+  private assertValidSignature(rawPayload: string, header: string): void {
+    const secret = config.stripeWebhookSecret
+    if (!secret) {
+      throw new Error('Stripe webhook signature and STRIPE_WEBHOOK_SECRET are required')
+    }
+
+    let timestamp: number | null = null
+    const signatures: string[] = []
+
+    for (const part of header.split(',')) {
+      const separator = part.indexOf('=')
+      if (separator === -1) continue
+      const key = part.slice(0, separator).trim()
+      const value = part.slice(separator + 1).trim()
+      if (key === 't') {
+        const parsed = Number(value)
+        if (Number.isInteger(parsed)) timestamp = parsed
+      } else if (key === 'v1') {
+        signatures.push(value)
+      }
+    }
+
+    if (timestamp === null || signatures.length === 0) {
+      throw new Error('Malformed Stripe webhook signature')
+    }
+
+    const age = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
+    if (age > STRIPE_WEBHOOK_TOLERANCE_SECONDS) {
+      throw new Error('Stripe webhook signature timestamp is outside the tolerance window')
+    }
+
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(`${timestamp}.${rawPayload}`, 'utf8')
+      .digest('hex')
+
+    const expectedBuffer = Buffer.from(expected, 'utf8')
+    const matched = signatures.some((candidate) => {
+      const candidateBuffer = Buffer.from(candidate, 'utf8')
+      if (candidateBuffer.length !== expectedBuffer.length) return false
+      return crypto.timingSafeEqual(candidateBuffer, expectedBuffer)
+    })
+
+    if (!matched) {
+      throw new Error('Invalid Stripe webhook signature')
+    }
   }
 }

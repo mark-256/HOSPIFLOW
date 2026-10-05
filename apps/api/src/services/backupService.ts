@@ -1,7 +1,7 @@
 import { execSync } from 'child_process'
 import { createGunzip, createGzip } from 'zlib'
 import { pipeline } from 'stream/promises'
-import { createReadStream, existsSync } from 'fs'
+import { createReadStream, existsSync, statSync } from 'fs'
 import { stat, unlink, mkdir } from 'fs/promises'
 import path from 'path'
 import { config } from '../config'
@@ -23,6 +23,46 @@ export interface BackupMetadata {
   size: number
   status: 'success' | 'failed'
   error?: string
+}
+
+/**
+ * Resolves a client-supplied backup reference to a real file inside the
+ * configured backup directory. Backup routes must never accept an arbitrary
+ * filesystem path: the reference may be either a bare filename or a path that
+ * was returned by listBackups(), and it is only accepted when it resolves
+ * inside `config.backupDir`, exists, and is a regular `.dump.gz` file.
+ */
+export function resolveBackupPath(reference: string): string {
+  if (typeof reference !== 'string' || reference.trim() === '') {
+    throw new Error('A backup filename is required')
+  }
+
+  if (reference.includes('\0')) {
+    throw new Error('Invalid backup reference')
+  }
+
+  const baseDir = path.resolve(config.backupDir || './backups')
+  const candidate = path.isAbsolute(reference) ? path.resolve(reference) : path.resolve(baseDir, reference)
+  const relative = path.relative(baseDir, candidate)
+
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Backup reference must resolve inside the configured backup directory')
+  }
+
+  if (!candidate.endsWith('.dump.gz')) {
+    throw new Error('Backup reference must reference a .dump.gz file')
+  }
+
+  if (!existsSync(candidate)) {
+    throw new Error('Backup file not found')
+  }
+
+  const stats = statSync(candidate)
+  if (!stats.isFile()) {
+    throw new Error('Backup reference must reference a regular file')
+  }
+
+  return candidate
 }
 
 export async function createBackup(): Promise<BackupMetadata> {

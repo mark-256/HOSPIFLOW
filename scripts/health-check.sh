@@ -158,8 +158,13 @@ fi
 
 echo
 echo "===== 14. REDIS CONNECTION ====="
-REDIS_PASSWORD="${REDIS_PASSWORD:-hf_redis_prod_2026!}"
-if docker exec hospiflow-redis-1 redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
+# The password is read from the environment only. It must never be committed as
+# a default here: a hardcoded fallback publishes the real credential to anyone
+# with repository access and to every clone and CI log.
+REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+if [ -z "$REDIS_PASSWORD" ]; then
+  warn "REDIS_PASSWORD not set — skipping authenticated Redis ping"
+elif docker exec hospiflow-redis-1 redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
   pass "Redis PONG"
 else
   warn "Redis ping failed (check password)"

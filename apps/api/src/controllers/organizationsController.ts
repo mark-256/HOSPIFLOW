@@ -40,14 +40,17 @@ export const organizationsController = {
     return res.json({ success: true, data: organization })
   },
 
-  updateOrganization: async (req: Request, res: Response) => {
+  updateOrganization: async (req: AuthenticatedRequest, res: Response) => {
+    if (req.params.id !== req.user!.organizationId) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Organization not found' } })
+    }
     const { name, status, settings } = req.body
     const organization = await prisma.organization.update({
-      where: { id: req.params.id },
+      where: { id: req.user!.organizationId },
       data: { ...(name && { name }), ...(status && { status }), ...(settings && { settings }) },
     })
     return res.json({ success: true, data: organization })
-  }
+  },
 }
 
 

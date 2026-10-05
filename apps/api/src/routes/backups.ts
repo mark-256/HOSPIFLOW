@@ -1,6 +1,6 @@
 import { Router, Response } from 'express'
 import { authMiddleware, requirePermission, AuthenticatedRequest } from '../middleware/auth'
-import { createBackup, listBackups, applyRetentionPolicy } from '../services/backupService'
+import { createBackup, listBackups, applyRetentionPolicy, resolveBackupPath } from '../services/backupService'
 import { verifyBackup, restoreBackup } from '../services/restoreService'
 import { asyncHandler } from '../utils/asyncHandler'
 
@@ -30,8 +30,13 @@ router.get('/', requirePermission('finance_edit'), asyncHandler(async (req: Auth
 }))
 
 router.get('/:id/verify', requirePermission('finance_edit'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  let backupPath: string
   try {
-    const backupPath = decodeURIComponent(req.params.id)
+    backupPath = resolveBackupPath(decodeURIComponent(req.params.id))
+  } catch (error) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error instanceof Error ? error.message : String(error) } })
+  }
+  try {
     const result = await verifyBackup(backupPath)
     if (result.valid) {
       return res.json({ success: true, data: result })
@@ -43,18 +48,25 @@ router.get('/:id/verify', requirePermission('finance_edit'), asyncHandler(async 
 }))
 
 router.post('/restore-test', requirePermission('finance_edit'), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { backupPath } = req.body
-    if (!backupPath) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'backupPath is required' } })
-    }
+  const { backupPath } = req.body
+  if (!backupPath) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'backupPath is required' } })
+  }
 
-    const verifyResult = await verifyBackup(backupPath)
+  let resolvedPath: string
+  try {
+    resolvedPath = resolveBackupPath(backupPath)
+  } catch (error) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error instanceof Error ? error.message : String(error) } })
+  }
+
+  try {
+    const verifyResult = await verifyBackup(resolvedPath)
     if (!verifyResult.valid) {
       return res.status(400).json({ success: false, error: { code: 'VERIFY_FAILED', message: verifyResult.error || 'Backup is not valid for restore' } })
     }
 
-    const restoreResult = await restoreBackup(backupPath)
+    const restoreResult = await restoreBackup(resolvedPath)
     if (restoreResult.success) {
       return res.json({ success: true, data: restoreResult })
     }

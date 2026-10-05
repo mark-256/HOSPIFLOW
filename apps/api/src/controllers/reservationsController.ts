@@ -34,13 +34,29 @@ export const reservationsController = {
     }
     const property = await prisma.property.findFirst({ where: { id: propertyId, organizationId: req.user!.organizationId, deletedAt: null } })
     if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
+    const guest = await prisma.guest.findFirst({ where: { id: guestId, property: { organizationId: req.user!.organizationId } } })
+    if (!guest) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
+    const roomType = await prisma.roomType.findFirst({ where: { id: roomTypeId, property: { organizationId: req.user!.organizationId } } })
+    if (!roomType) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Room type not found' } })
+    let validatedRoomId: string | undefined
+    if (roomId) {
+      const room = await prisma.room.findFirst({ where: { id: roomId, propertyId: property.id, roomTypeId: roomType.id } })
+      if (!room) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Room not found for this property and room type' } })
+      validatedRoomId = room.id
+    }
+    let validatedRatePlanId: string | undefined
+    if (ratePlanId) {
+      const ratePlan = await prisma.ratePlan.findFirst({ where: { id: ratePlanId, propertyId: property.id } })
+      if (!ratePlan) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Rate plan not found for this property' } })
+      validatedRatePlanId = ratePlan.id
+    }
     const confirmationCode = `RES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
     const reservation = await prisma.$transaction(async (tx: TransactionClient): Promise<Awaited<ReturnType<typeof prisma.reservation.create>> | null> => {
-      if (roomId) {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${roomId}))`
+      if (validatedRoomId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${validatedRoomId}))`
         const overlapping = await tx.reservation.findFirst({
           where: {
-            roomId,
+            roomId: validatedRoomId,
             status: { in: [ReservationStatus.PENDING, ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN] },
             OR: [
               { checkInDate: { lt: checkOut }, checkOutDate: { gt: checkIn } },
@@ -52,7 +68,7 @@ export const reservationsController = {
         }
       }
       return tx.reservation.create({
-        data: { propertyId, guestId, roomTypeId, roomId, confirmationCode, checkInDate: checkIn, checkOutDate: checkOut, adults, children: children ?? 0, ratePlanId, rate: rate ? parseFloat(rate) : 0, depositAmount: depositAmount ? parseFloat(depositAmount) : null, depositPaid: depositPaid ?? false, specialRequests, source, notes },
+        data: { propertyId, guestId: guest.id, roomTypeId: roomType.id, roomId: validatedRoomId, confirmationCode, checkInDate: checkIn, checkOutDate: checkOut, adults, children: children ?? 0, ratePlanId: validatedRatePlanId, rate: rate ? parseFloat(rate) : 0, depositAmount: depositAmount ? parseFloat(depositAmount) : null, depositPaid: depositPaid ?? false, specialRequests, source, notes },
       })
     })
     if (!reservation) return res.status(400).json({ success: false, error: { code: 'CONFLICT', message: 'Room is already booked for the selected dates' } })
@@ -100,7 +116,11 @@ export const reservationsController = {
     const data: any = { status: nextStatus }
     if (nextStatus === ReservationStatus.CHECKED_IN) {
       data.checkedInAt = new Date()
-      if (roomId) data.roomId = roomId
+      if (roomId) {
+        const room = await prisma.room.findFirst({ where: { id: String(roomId), propertyId: reservation.propertyId } })
+        if (!room) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Room not found for this reservation' } })
+        data.roomId = room.id
+      }
     }
     if (nextStatus === ReservationStatus.CHECKED_OUT) data.checkedOutAt = new Date()
     if (nextStatus === ReservationStatus.CANCELLED) data.cancelledAt = new Date()

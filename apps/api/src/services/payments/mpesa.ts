@@ -1,6 +1,15 @@
 import { PaymentProviderAdapter, PaymentRequest, PaymentResponse, RefundRequest, RefundResponse } from './types'
 import { config } from '../../config'
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 export class MpesaProvider implements PaymentProviderAdapter {
   name = 'MPESA' as const
   private readonly baseUrl: string
@@ -192,11 +201,13 @@ export class MpesaProvider implements PaymentProviderAdapter {
       }
     }
 
-    const amount = typeof metadata.Amount === 'number' ? metadata.Amount : undefined
+    // Safaricom sends CallbackMetadata values as strings ("100.00"), while some
+    // proxies and test harnesses deliver them as numbers. Accept both.
+    const amount = toFiniteNumber(metadata.Amount)
     const reference = typeof metadata.MpesaReceiptNumber === 'string' ? metadata.MpesaReceiptNumber : undefined
-    const phoneNumber = typeof metadata.PhoneNumber === 'number' ? String(metadata.PhoneNumber) : undefined
+    const phoneNumber = metadata.PhoneNumber === undefined ? undefined : String(metadata.PhoneNumber)
 
-    if (typeof amount !== 'number' || amount < 0) {
+    if (amount === null || amount < 0) {
       throw new Error('Invalid callback amount')
     }
 

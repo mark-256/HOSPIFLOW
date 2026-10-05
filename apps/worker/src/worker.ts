@@ -189,6 +189,9 @@ async function verifyRedisConnection(redisUrl: string): Promise<void> {
 
   try {
     await redis.ping()
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`could not reach Redis at ${redisUrl} (${reason})`)
   } finally {
     redis.disconnect()
   }
@@ -203,21 +206,26 @@ async function startWorker(): Promise<void> {
 
   try {
     await verifyRedisConnection(redisUrl)
+    console.log('Redis connection established')
 
     const { Queue, Worker } = await import('bullmq')
-    const connection = {
-      url: redisUrl,
-      connectTimeout: 5000,
-    }
+    const { Redis } = await import('ioredis')
 
-    queue = new Queue('backups', { connection })
+    // BullMQ does not understand a `url` key in its connection options — an
+    // IORedis instance built from REDIS_URL is required so the worker honours
+    // REDIS_URL in every environment (host, Docker service name, remote host).
+    // maxRetriesPerRequest must stay null for BullMQ workers.
+    const createConnection = () =>
+      new Redis(redisUrl, { maxRetriesPerRequest: null })
+
+    queue = new Queue('backups', { connection: createConnection() })
     worker = new Worker(
       'backups',
       async () => {
         console.log('[BACKUP] Running scheduled backup via BullMQ')
         await runScheduledBackup()
       },
-      { connection }
+      { connection: createConnection() }
     )
 
     worker.on('error', error => {
@@ -253,7 +261,9 @@ async function startWorker(): Promise<void> {
     await worker?.close().catch(() => undefined)
     await queue?.close().catch(() => undefined)
 
+    const reason = error instanceof Error ? error.message : String(error)
     console.warn('[BACKUP] BullMQ unavailable, using setInterval fallback')
+    console.warn(`[BACKUP] Fallback reason: ${reason}`)
     const intervalMs = parseCronToMs(BACKUP_SCHEDULE) || 24 * 60 * 60 * 1000
     console.log(`[BACKUP] Fallback interval: ${intervalMs}ms`)
 

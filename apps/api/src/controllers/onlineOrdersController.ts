@@ -1,4 +1,4 @@
-import { Request, Response } from 'express'
+import { Response } from 'express'
 import { PrismaClient, OrderType } from '@hospiflow/database'
 import { AuthenticatedRequest } from '../middleware/auth'
 
@@ -13,9 +13,9 @@ function toDecimal(value: unknown): number {
 }
 
 export const onlineOrdersController = {
-  list: async (req: Request, res: Response) => {
+  list: async (req: AuthenticatedRequest, res: Response) => {
     const { outletId, status } = req.query
-    const where: any = { orderType: 'DELIVERY' }
+    const where: any = { orderType: 'DELIVERY', outlet: { property: { organizationId: req.user!.organizationId } } }
     if (outletId) where.outletId = String(outletId)
     if (status) where.status = String(status)
     const orders = await prisma.order.findMany({ where, include: { items: true, guest: true }, orderBy: { createdAt: 'desc' } })
@@ -27,6 +27,24 @@ export const onlineOrdersController = {
     if (!outletId || !customerName || !customerPhone || !items?.length) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Outlet, customer name, phone, and items are required' } })
     }
+    const outlet = await prisma.outlet.findFirst({
+      where: { id: String(outletId), property: { organizationId: req.user!.organizationId } },
+      select: { id: true },
+    })
+    if (!outlet) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Outlet not found' } })
+    }
+    let validatedGuestId: string | undefined
+    if (guestId) {
+      const guest = await prisma.guest.findFirst({
+        where: { id: String(guestId), property: { organizationId: req.user!.organizationId } },
+        select: { id: true },
+      })
+      if (!guest) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
+      }
+      validatedGuestId = guest.id
+    }
     const orderNumber = `ONL-${Date.now().toString(36).toUpperCase()}`
     let subtotal = 0
     const orderItems: any[] = []
@@ -34,9 +52,15 @@ export const onlineOrdersController = {
       if (!item.productId || !item.quantity || item.quantity <= 0) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Each item requires a valid productId and quantity' } })
       }
-      const product = await prisma.product.findUnique({ where: { id: item.productId }, include: { menuCategory: { include: { menu: true } } } })
+      const product = await prisma.product.findFirst({
+        where: {
+          id: String(item.productId),
+          menuCategory: { menu: { outletId: outlet.id } },
+        },
+        include: { menuCategory: { include: { menu: true } } },
+      })
       if (!product) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Product ${item.productId} not found` } })
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `Product ${item.productId} is not available for this outlet` } })
       }
       const unitPrice = toDecimal(product.price)
       const quantity = Math.max(1, Math.floor(Number(item.quantity)))
@@ -46,17 +70,17 @@ export const onlineOrdersController = {
     }
     const order = await prisma.order.create({
       data: {
-        outletId,
+        outletId: outlet.id,
         orderNumber,
         orderType: OrderType.DELIVERY,
-        guestId,
+        guestId: validatedGuestId,
         customerName,
         customerPhone,
         roomNumber: deliveryAddress,
         subtotal,
         total: subtotal,
         balance: subtotal,
-        createdById: req.user?.id || guestId || '',
+        createdById: req.user?.id,
       },
     })
     for (const item of orderItems) {
