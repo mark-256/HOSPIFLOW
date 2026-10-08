@@ -1,9 +1,17 @@
 # Testing
 
-## Unit
+## Run tests
 
 ```bash
 npm run test
+```
+
+Run a focused suite from the API workspace:
+
+```bash
+cd apps/api
+npx vitest run tests/unit/
+npx vitest run tests/integration/
 ```
 
 The integration suite TRUNCATEs and re-seeds on every run, so it requires an
@@ -48,4 +56,14 @@ npm run test:e2e
 
 ## API
 
-Tests located in `apps/api/tests/`.
+Tests are in `apps/api/tests/`, grouped into `unit/` and `integration/`.
+Integration coverage includes authentication, tenant isolation, payments,
+inventory, reservations, and other API workflows.
+
+## Code checks
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
