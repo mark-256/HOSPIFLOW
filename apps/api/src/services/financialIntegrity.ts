@@ -121,19 +121,31 @@ export async function reconcileOrderCollection(
 ): Promise<OrderLedgerState> {
   const rows = await db.$queryRaw<Array<{ paidAmount: string; balance: string; total: string }>>`
     UPDATE "Order" o
-       SET "paidAmount" = agg."paid",
-           "balance"     = o."total" - agg."paid",
-           "updatedAt"   = NOW()
+        SET "paidAmount" = agg."paid",
+            "balance"     = o."total" - agg."paid",
+            "updatedAt"   = NOW()
       FROM (
-        SELECT COALESCE(SUM(p."amount"), 0) AS "paid"
+        SELECT COALESCE(SUM(
+          CASE p."status"
+            WHEN 'COMPLETED' THEN p."amount"
+            WHEN 'PARTIALLY_REFUNDED' THEN p."amount" - COALESCE(r."refunded", 0)
+            WHEN 'REFUNDED' THEN 0
+            ELSE 0
+          END
+        ), 0) AS "paid"
           FROM "OrderPayment" p
+          LEFT JOIN (
+            SELECT pr."paymentId", SUM(pr."amount") AS "refunded"
+              FROM "Refund" pr
+             WHERE pr."status" = 'COMPLETED'
+             GROUP BY pr."paymentId"
+          ) r ON r."paymentId" = p."id"
          WHERE p."orderId" = ${orderId}
-           AND p."status" = 'COMPLETED'
       ) agg
      WHERE o."id" = ${orderId}
        AND agg."paid" <= o."total"
-    RETURNING o."paidAmount", o."balance", o."total"
-  `
+   RETURNING o."paidAmount", o."balance", o."total"
+   `
 
   if (rows.length > 0) {
     const row = rows[0]
@@ -185,6 +197,25 @@ export function storedProviderReference(payment: {
     if (typeof candidate === 'string' && candidate.length > 0) return candidate
   }
   return null
+}
+
+/**
+ * The provider identity a callback/webhook must match to settle `payment`.
+ *
+ * A real provider recorded on the payment (STRIPE/MPESA/BANK/CARD) is
+ * authoritative — a Stripe callback may never settle an M-Pesa payment and
+ * vice versa. A MOCK/test payment carries no real provider identity because the
+ * only adapter initialised in the test deployment is MOCK, so the intended
+ * provider is derived from the payment method. This never weakens production:
+ * production payments are never MOCK.
+ */
+export function providerIdentityFor(payment: { provider?: string | null; paymentMethod?: string | null }): string | null {
+  if (payment.provider && payment.provider !== 'MOCK') {
+    return payment.provider
+  }
+  if (payment.paymentMethod === 'STRIPE') return 'STRIPE'
+  if (payment.paymentMethod === 'MPESA') return 'MPESA'
+  return payment.provider ?? null
 }
 
 /** Payment statuses that a later provider report or client request may not re-open. */

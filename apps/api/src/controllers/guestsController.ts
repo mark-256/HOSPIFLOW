@@ -48,11 +48,12 @@ export const guestsController = {
 
   update: async (req: AuthenticatedRequest, res: Response) => {
     const { firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth, address, city, country, preferences, notes, isVip, isBlacklisted } = req.body
+    const existing = await prisma.guest.findFirst({ where: { id: req.params.id, property: { organizationId: req.user!.organizationId } } })
+    if (!existing) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
     const guest = await prisma.guest.update({
-      where: { id: req.params.id, property: { organizationId: req.user!.organizationId } },
+      where: { id: req.params.id },
       data: { firstName, lastName, email, phone, nationality, idNumber, idType, dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined, address, city, country, preferences, notes, isVip, isBlacklisted },
     })
-    if (!guest) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Guest not found' } })
     return res.json({ success: true, data: guest })
   },
 }

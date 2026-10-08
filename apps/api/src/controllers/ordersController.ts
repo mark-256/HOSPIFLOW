@@ -231,6 +231,11 @@ export const ordersController = {
     const authoritativePrice = Number(product.price)
     const qty = Math.max(1, Math.floor(parsedQuantity))
     const total = Math.round(authoritativePrice * qty * 100) / 100
+    // B40 — a hostile quantity that overflows the Decimal(10,2) column must be a
+    // 4xx before it reaches Prisma, never an unhandled 500.
+    if (total > MAX_MONEY_10_2) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Quantity results in a total that exceeds the maximum supported value' } })
+    }
     const item = await prisma.orderItem.create({ data: { orderId: order.id, productId: product.id, productName: product.name, productCode: product.code, quantity: qty, unitPrice: authoritativePrice, total, notes } })
     await prisma.order.update({ where: { id: order.id }, data: { subtotal: { increment: total }, total: { increment: total }, balance: { increment: total } } })
     return res.status(201).json({ success: true, data: item })

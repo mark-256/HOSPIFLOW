@@ -111,7 +111,7 @@ describe('B40 financial tenant isolation — payment access', () => {
       .set(authHeaders(adminA))
       .send({ paymentMethod: 'CASH', amount: 1, provider: 'MOCK' })
     expect([403, 404]).toContain(res.status)
-    expect((await prisma.order.findUnique({ where: { id: orderB.id } })).paidAmount).toBe(Number(before.paidAmount))
+    expect(Number((await prisma.order.findUnique({ where: { id: orderB.id } })).paidAmount)).toBe(Number(before.paidAmount))
   })
 
   it('org A cannot initiate a payment against org B order', async () => {
@@ -238,9 +238,8 @@ describe('B40 financial tenant isolation — outlet scope', () => {
     })
     expect([403, 404]).toContain(res.status)
 
-    const payment = await prisma.orderPayment.findFirst({ where: { orderId: orderOutletA.id } })
-    const stored = await prisma.order.findUnique({ where: { id: payment.orderId }, include: { outlet: true } })
-    expect(stored.outletId).toBe(fixture.orgA.outletId)
+    const attached = await prisma.orderPayment.findFirst({ where: { orderId: orderOutletB.id } })
+    expect(attached).toBeNull()
   }, 30000)
 
   it('two tenants settling the same nominal amount keep entirely separate ledgers', async () => {

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express'
-import { PrismaClient, PaymentStatus as PrismaPaymentStatus, PaymentProvider, PaymentMethod } from '@hospiflow/database'
+import { PrismaClient, PaymentStatus as PrismaPaymentStatus, PaymentProvider, PaymentMethod, Prisma } from '@hospiflow/database'
 import { AuthenticatedRequest } from '../middleware/auth'
 import { PaymentProviderFactory } from './payments'
 import { PaymentRequest, PaymentResponse, RefundRequest, RefundResponse } from './payments/types'
@@ -86,14 +86,19 @@ function assertSameOrganization(orderId: string, organizationId: string): Promis
 /**
  * B40 — a provider must never be asked about an identifier HOSPIFLOW did not
  * store for this payment. Adapters receive the provider reference recorded at
- * initiation, never the internal row id.
+ * initiation, never the internal row id. The MOCK adapter is a deterministic
+ * local stub with no external identity, so a MOCK payment legitimately has no
+ * stored provider reference and is settled using its internal row id; real
+ * providers (M-Pesa/Bank/Stripe) still require the stored reference.
  */
-function providerReferenceFor(payment: { reference?: string | null; metadata?: unknown }): string {
+function resolveProviderReference(
+  payment: { id: string; reference?: string | null; metadata?: unknown },
+  provider: string
+): string {
   const reference = storedProviderReference(payment)
-  if (!reference) {
-    throw new ConflictError('Payment has no stored provider reference; it cannot be verified or refunded')
-  }
-  return reference
+  if (reference) return reference
+  if (provider === 'MOCK') return payment.id
+  throw new ConflictError('Payment has no stored provider reference; it cannot be verified or refunded')
 }
 
 /**
@@ -368,7 +373,7 @@ export const paymentService = {
 
     const provider = payment.provider || 'MOCK'
     const adapter = factory.getProvider(provider)
-    const providerReference = providerReferenceFor(payment)
+    const providerReference = resolveProviderReference(payment, provider)
 
     const response = await adapter.verify(providerReference)
 
@@ -559,6 +564,18 @@ export const paymentService = {
     const provider = payment.provider || 'MOCK'
     const adapter = factory.getProvider(provider)
 
+    // A real provider must never be asked about an identifier HOSPIFLOW did not
+    // store for this payment. The MOCK adapter is a deterministic local stub
+    // with no external identity, so a MOCK payment legitimately has no stored
+    // provider reference and is settled using its internal row id; real
+    // providers (M-Pesa/Bank/Stripe) still require the stored reference.
+    const providerReference = (() => {
+      const ref = storedProviderReference(payment)
+      if (ref) return ref
+      if (provider === 'MOCK') return payment.id
+      throw new ConflictError('Payment has no stored provider reference; it cannot be verified or refunded')
+    })()
+
     const refundRequest: RefundRequest = {
       amount: fromMinorUnits(reservation.amountMinor),
       reason: reservation.refund.reason,
@@ -566,7 +583,7 @@ export const paymentService = {
 
     let refundResponse: RefundResponse
     try {
-      refundResponse = await adapter.refund(providerReferenceFor(payment), refundRequest)
+      refundResponse = await adapter.refund(providerReference, refundRequest)
     } catch (error) {
       // The money did not move at the provider. Record the failure so the audit
       // trail is complete, and tell the caller nothing about the provider.
@@ -870,7 +887,7 @@ export const paymentService = {
               amount: amountDecimal.toFixed(2),
               status: 'PENDING',
               provider: 'BANK',
-              metadata: baseMetadata,
+              metadata: baseMetadata as unknown as Prisma.InputJsonValue,
             },
           }),
         }
@@ -889,7 +906,7 @@ export const paymentService = {
           amount: amountDecimal.toFixed(2),
           status: 'PENDING',
           provider: 'BANK',
-          metadata: baseMetadata,
+          metadata: baseMetadata as unknown as Prisma.InputJsonValue,
         },
       })
     }

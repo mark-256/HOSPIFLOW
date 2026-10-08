@@ -3,7 +3,7 @@ import { Response } from 'express'
 import { PrismaClient, PaymentStatus } from '@hospiflow/database'
 import { config } from '../config'
 import { PaymentResponse } from './payments/types'
-import { reconcileOrderCollection } from './financialIntegrity'
+import { reconcileOrderCollection, providerIdentityFor } from './financialIntegrity'
 
 const prisma = new PrismaClient()
 
@@ -52,6 +52,21 @@ function toMinorUnits(amount: unknown): number | null {
   const num = typeof amount === 'number' ? amount : parseFloat(String(amount))
   if (!Number.isFinite(num) || num < 0) return null
   return Math.round(num * 100)
+}
+
+/**
+ * Maps a webhook `source` (the trusted name hardcoded in the webhook routes) to
+ * the canonical PaymentProvider value it represents. Used as the provider
+ * identity for a callback whose response does not carry a real provider (the
+ * MOCK test stub).
+ */
+const WEBHOOK_SOURCE_PROVIDER: Record<string, string> = {
+  Stripe: 'STRIPE',
+  'M-Pesa': 'MPESA',
+}
+
+function sourceProvider(source: string): string | undefined {
+  return WEBHOOK_SOURCE_PROVIDER[source]
 }
 
 /**
@@ -145,10 +160,18 @@ export async function applyProviderWebhook(
   }
 
   // B40 — the provider identity must be part of the authoritative relationship.
-  // A Stripe event may not settle an M-Pesa payment or vice versa.
-  if (payment.provider && response.provider && payment.provider !== response.provider) {
+  // A Stripe event may not settle an M-Pesa payment or vice versa. The payment's
+  // provider is authoritative; for a MOCK/test payment (no real provider) the
+  // intended provider is derived from the payment method. The callback's provider
+  // is the adapter-reported response.provider, falling back to the trusted webhook
+  // source (hardcoded in the webhook routes) when the response carries no real
+  // provider — e.g. the MOCK test stub, which has no external identity.
+  const paymentIdentity = providerIdentityFor(payment)
+  const callbackProvider =
+    response.provider && response.provider !== 'MOCK' ? response.provider : sourceProvider(source)
+  if (paymentIdentity && callbackProvider && paymentIdentity !== callbackProvider) {
     console.warn(
-      `[SECURITY] ${source} webhook provider mismatch for payment ${payment.id} (stored ${payment.provider}, callback ${response.provider}); not applying.`
+      `[SECURITY] ${source} webhook provider mismatch for payment ${payment.id} (stored ${String(paymentIdentity)}, callback ${String(callbackProvider)}); not applying.`
     )
     return { status: 200, body: { success: true, message: 'Webhook provider mismatch; no action taken' } }
   }
@@ -176,6 +199,13 @@ export async function applyProviderWebhook(
   }
 
     const applied = await prisma.$transaction(async (tx) => {
+    // Serialize all webhook processing for this payment so that concurrent
+    // deliveries of the same provider event cannot both transition it: only the
+    // first to acquire the lock progresses; the rest observe a terminal status
+    // and no-op. pg_advisory_xact_lock is transaction-scoped and is released on
+    // commit/rollback, so it never deadlocks with itself.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payment.id}))`
+
     const current = await tx.orderPayment.findUniqueOrThrow({ where: { id: payment.id } })
 
     // Re-check terminality inside the transaction so concurrent deliveries of the

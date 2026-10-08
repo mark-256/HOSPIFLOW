@@ -3,6 +3,7 @@ import { MpesaProvider } from './mpesa'
 import { StripeProvider } from './stripe'
 import { MockProvider } from './mock'
 import { BankProvider } from './bank'
+import { BadRequestError } from '../../utils/errors'
 import { config } from '../../config'
 
 export type ProviderKind = 'MPESA' | 'STRIPE' | 'MOCK' | 'BANK'
@@ -84,7 +85,10 @@ export class PaymentProviderFactory {
   getProvider(kind: string): PaymentProviderAdapter {
     const provider = this.providers.get(kind.toUpperCase())
     if (!provider) {
-      throw new Error(`Payment provider ${kind} is not initialized`)
+      throw new BadRequestError(
+        `Payment provider ${kind} is not available in this deployment`,
+        'VALIDATION_ERROR'
+      )
     }
     return provider
   }

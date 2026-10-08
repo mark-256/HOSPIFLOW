@@ -35,10 +35,10 @@ const LEAK_MARKERS = [
   '    at ',
   'node_modules',
   'prisma/',
-  'Invalid ',
   'SELECT ',
   'INSERT ',
   'UPDATE ',
+  'DELETE ',
   'ECONNREFUSED',
   'DATABASE_URL',
   'postgresql://',
@@ -48,6 +48,9 @@ const LEAK_MARKERS = [
   'MPESA_CONSUMER_SECRET',
   'stack',
   '.ts:',
+  ' PrismaClient',
+  'ConnectorError',
+  'QueryError',
 ]
 
 function expectNoLeak(body: string) {

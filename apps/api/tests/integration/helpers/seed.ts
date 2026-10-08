@@ -67,7 +67,7 @@ function rolePerms(role: string): string[] {
     case 'RESTAURANT_MANAGER':
       return ['orders_create', 'orders_view', 'orders_edit', 'orders_cancel', 'orders_discount', 'payments_process', 'payments_refund', 'shifts_view', 'shifts_manage', 'menu_manage']
     case 'CASHIER':
-      return ['orders_create', 'orders_view', 'orders_edit', 'payments_process', 'payments_refund', 'shifts_view']
+      return ['orders_create', 'orders_view', 'orders_edit', 'payments_process', 'payments_refund', 'shifts_view', 'folios_view', 'folios_edit']
     case 'WAITER':
       return ['orders_create', 'orders_view', 'orders_edit']
     case 'CHEF':

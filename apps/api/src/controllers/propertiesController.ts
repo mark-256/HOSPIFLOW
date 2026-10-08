@@ -58,8 +58,10 @@ export const propertiesController = {
 
   updateProperty: async (req: AuthenticatedRequest, res: Response) => {
     const { name, status, address, city, country, phone, email, timezone, currency, settings } = req.body
-    const property = await prisma.property.update({
-      where: { id: req.params.id, organizationId: req.user!.organizationId },
+    const property = await prisma.property.findFirst({ where: { id: req.params.id, organizationId: req.user!.organizationId, deletedAt: null } })
+    if (!property) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Property not found' } })
+    const updated = await prisma.property.update({
+      where: { id: req.params.id },
       data: {
         ...(name && { name }),
         ...(status && { status }),
@@ -74,6 +76,6 @@ export const propertiesController = {
       },
       include: { organization: true },
     })
-    return res.json({ success: true, data: property })
+    return res.json({ success: true, data: updated })
   }
 }
