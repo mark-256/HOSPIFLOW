@@ -1,30 +1,18 @@
-import { test } from '@playwright/test'
+import { expect, test } from '@playwright/test';
 
-test('login and access protected endpoints', async ({ page }) => {
-  page.on('request', (request) => {
-    const headers = request.headers()
-    console.log('REQUEST:', request.method(), request.url(), 'auth:', headers['authorization'] ? 'YES' : 'NO')
-  })
-  page.on('response', (response) => {
-    console.log('RESPONSE:', response.status(), response.url())
-  })
+test('a seeded user can sign in and load hotel operations', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(process.env.E2E_EMAIL ?? 'admin@hospiflow.com');
+  await page.getByLabel('Password').fill(process.env.E2E_PASSWORD ?? 'admin123');
+  await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await page.goto('http://localhost:3000/login')
-  await page.evaluate(() => localStorage.clear())
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('token'))).toBeTruthy();
 
-  await page.fill('input[type="email"]', 'admin@hospiflow.com')
-  await page.fill('input[type="password"]', 'admin123')
-  await page.click('button[type="submit"]')
-
-  await page.waitForURL('**/dashboard')
-  await page.waitForTimeout(2000)
-
-  const token = await page.evaluate(() => localStorage.getItem('token'))
-  console.log('Token in localStorage:', token ? `${token.substring(0, 50)}...` : 'NOT FOUND')
-
-  await page.goto('http://localhost:3000/hotel')
-  await page.waitForTimeout(5000)
-
-  const errorText = await page.locator('text=Unable to load hotel operations').count()
-  console.log('Hotel error visible:', errorText > 0)
-})
+  await page.goto('/hotel');
+  await expect(page.getByRole('heading', { name: 'Hotel' })).toBeVisible();
+  await expect(page.getByText('Properties', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Unable to load hotel operations' })).toHaveCount(
+    0
+  );
+});
