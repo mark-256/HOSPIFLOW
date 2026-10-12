@@ -1,5 +1,10 @@
-import { redirect } from 'next/navigation'
+import { redirect } from 'next/navigation';
 
-export default function LegacyQROrderPage({ params }: { params: { token: string } }) {
-  redirect(`/qr-order?token=${encodeURIComponent(params.token)}`)
+export default async function LegacyQROrderPage({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
+  const { token } = await params;
+  redirect(`/qr-order?token=${encodeURIComponent(token)}`);
 }

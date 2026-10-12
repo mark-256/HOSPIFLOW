@@ -340,7 +340,7 @@ describe('B40 amounts — currency integrity', () => {
     const payment = await prisma.orderPayment.findFirst({ where: { orderId: order.id } })
     await simulateMpesaAnchor(prisma, payment.id, anchor)
 
-    const { applyProviderWebhook } = await import('../../src/services/paymentWebhookService')
+    const { applyProviderWebhook } = await import('../../src/services/paymentWebhookService.js')
     const res = await applyProviderWebhook('Stripe', {
       id: anchor,
       status: 'SUCCEEDED',

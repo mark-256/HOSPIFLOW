@@ -141,7 +141,7 @@ describe('B40 M-Pesa — callback authentication', () => {
     config.nodeEnv = 'production'
     config.mpesaWebhookSecret = ''
     try {
-      const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService')
+      const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService.js')
       expect(verifyWebhookSecret(undefined, 'M-Pesa')).toBe(false)
       expect(verifyWebhookSecret('anything', 'M-Pesa')).toBe(false)
 
@@ -161,7 +161,7 @@ describe('B40 M-Pesa — callback authentication', () => {
     config.nodeEnv = 'staging'
     config.mpesaWebhookSecret = ''
     try {
-      const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService')
+      const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService.js')
       expect(verifyWebhookSecret('anything', 'M-Pesa')).toBe(false)
     } finally {
       config.nodeEnv = previous
@@ -174,7 +174,7 @@ describe('B40 M-Pesa — callback authentication', () => {
       config.nodeEnv = env
       config.mpesaWebhookSecret = ''
       try {
-        const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService')
+        const { verifyWebhookSecret } = await import('../../src/services/paymentWebhookService.js')
         expect(verifyWebhookSecret(undefined, 'M-Pesa')).toBe(true)
       } finally {
         config.nodeEnv = previous

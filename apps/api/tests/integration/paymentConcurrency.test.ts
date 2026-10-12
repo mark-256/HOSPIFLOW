@@ -185,7 +185,7 @@ describe('B40 concurrency — refunds', () => {
     expect(accepted.length).toBe(1)
 
     const refunds = await prisma.refund.findMany({ where: { paymentId: payment.id } })
-    const total = refunds.reduce((sum, r) => sum + Number(r.amount), 0)
+    const total = refunds.reduce((sum: number, r: { amount: unknown }) => sum + Number(r.amount), 0)
     expect(total).toBeLessThanOrEqual(amount)
     expect(total).toBe(amount)
 
@@ -209,7 +209,7 @@ describe('B40 concurrency — refunds', () => {
 
     const accepted = responses.filter((r) => r.status === 201)
     const refunds = await prisma.refund.findMany({ where: { paymentId: payment.id } })
-    const total = refunds.reduce((sum, r) => sum + Number(r.amount), 0)
+    const total = refunds.reduce((sum: number, r: { amount: unknown }) => sum + Number(r.amount), 0)
 
     expect(accepted.length).toBe(refunds.length)
     expect(total).toBeLessThanOrEqual(amount)

@@ -301,6 +301,7 @@ describe('B40 audit trail — financial operations are recorded and tenant-scope
       where: { organizationId: fixture.orgA.organizationId, entity: 'FolioTransaction', entityId: entryId },
     })
     expect(audits.length).toBeGreaterThan(0)
+    expect(audits.some((entry: { action: string }) => entry.action === 'FOLIO_TRANSACTION')).toBe(true)
     for (const entry of audits) {
       expectNoLeak(JSON.stringify(entry.metadata ?? {}))
     }

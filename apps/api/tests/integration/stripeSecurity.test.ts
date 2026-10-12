@@ -288,7 +288,7 @@ describe('B40 Stripe — provider identifier integrity', () => {
     const anchor = `b40_mixup2_${payment.id}`
     await simulateStripeAnchor(prisma, payment.id, anchor)
 
-    const { MpesaProvider } = await import('../../src/services/payments/mpesa')
+    const { MpesaProvider } = await import('../../src/services/payments/mpesa.js')
     const mpesa = new MpesaProvider()
     const response = await mpesa.handleWebhook({
       Body: {
@@ -410,11 +410,11 @@ describe('B40 Stripe — event types and secrets', () => {
 
     const event = {
       id: anchor,
-      status: 'SUCCEEDED',
+      status: 'SUCCEEDED' as const,
       amount: order.total,
       currency: 'KES',
-      provider: 'STRIPE',
-      method: 'CARD',
+      provider: 'STRIPE' as const,
+      method: 'CARD' as const,
       createdAt: new Date(),
     }
     for (let i = 0; i < 5; i += 1) {

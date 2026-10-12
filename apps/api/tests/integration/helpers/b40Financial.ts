@@ -27,6 +27,13 @@ export interface B40Order {
   currency: string
 }
 
+export interface B40PaidPayment {
+  id: string
+  orderId: string
+  amount: number
+  status: string
+}
+
 export async function createOrder(
   app: Express,
   token: AuthTokens,
@@ -178,7 +185,7 @@ export function payOrder(
   token: AuthTokens,
   outletId: string,
   productId: string
-): Promise<{ id: string; amount: number; status: string }> {
+): Promise<B40PaidPayment> {
   return (async () => {
     const order = await createOrderWithItems(app, token, outletId, productId, 1)
     const res = await request(app)

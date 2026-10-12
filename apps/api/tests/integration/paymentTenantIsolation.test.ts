@@ -172,7 +172,7 @@ describe('B40 financial tenant isolation — webhooks', () => {
 
     // A callback body that tries to carry tenant context is ignored: the resolver
     // derives the organization from the payment's own order.
-    const res = await applyProviderWebhook('M-Pesa', {
+    const callback: Parameters<typeof applyProviderWebhook>[1] & { organizationId: string } = {
       id: anchor,
       status: 'SUCCEEDED',
       reference: 'QJG0000B40',
@@ -183,7 +183,8 @@ describe('B40 financial tenant isolation — webhooks', () => {
       method: 'MPESA',
       createdAt: new Date(),
       organizationId: fixture.orgA.organizationId,
-    })
+    }
+    const res = await applyProviderWebhook('M-Pesa', callback)
 
     expect(res.status).toBe(200)
     const after = await prisma.orderPayment.findUnique({
@@ -209,7 +210,7 @@ describe('B40 financial tenant isolation — webhooks', () => {
 
     await applyProviderWebhook(
       'M-Pesa',
-      await new (await import('../../src/services/payments/mpesa')).MpesaProvider().handleWebhook(
+      await new (await import('../../src/services/payments/mpesa.js')).MpesaProvider().handleWebhook(
         mpesaCallback(anchor, toMinor(orgBOrder.total))
       )
     )

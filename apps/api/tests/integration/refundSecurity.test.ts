@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import request from 'supertest'
 import type { Express } from 'express'
 import { getApp, getPrisma, disconnect } from './helpers/app'
@@ -6,6 +6,7 @@ import { login, authHeaders, AuthTokens } from './helpers/auth'
 import { setupSecurityFixtures, SecurityFixture } from './helpers/securityFixtures'
 import { config } from '../../src/config'
 import { payOrder } from './helpers/b40Financial'
+import { PaymentProviderFactory } from '../../src/services/payments'
 
 /**
  * B40 — Refund integrity (mission §17, §30).
@@ -42,7 +43,7 @@ function refund(paymentId: string, amount: unknown, token: AuthTokens = adminA, 
 
 async function refundedTotal(paymentId: string): Promise<number> {
   const refunds = await prisma.refund.findMany({ where: { paymentId } })
-  return refunds.reduce((sum, r) => sum + Number(r.amount), 0)
+  return refunds.reduce((sum: number, refund: { amount: unknown }) => sum + Number(refund.amount), 0)
 }
 
 describe('B40 refunds — amount bounds', () => {
@@ -181,15 +182,37 @@ describe('B40 refunds — authorisation and state', () => {
 describe('B40 refunds — provider interaction', () => {
   it('a provider that cannot refund produces a client-safe error, not an unhandled 500', async () => {
     const payment = await payOrder(app, cashierA, fixture.orgA.outletId, fixture.orgA.productId)
-    await prisma.orderPayment.update({ where: { id: payment.id }, data: { provider: 'MPESA' } })
+    const factory = PaymentProviderFactory.getInstance()
+    const mockProvider = factory.getProvider('MOCK')
+    const failingProvider = {
+      ...mockProvider,
+      refund: async () => {
+        throw new Error('simulated provider failure')
+      },
+    }
+    const providerSpy = vi.spyOn(factory, 'getProvider').mockReturnValue(failingProvider)
 
-    const res = await refund(payment.id, 1)
-    const body = JSON.stringify(res.body)
-    expect(res.status).toBeLessThan(500)
-    expect(body).not.toContain('M-Pesa refunds require manual processing')
-    expect(body).not.toContain('C2B')
-    expect(body).not.toContain('at ')
-    expect((await prisma.orderPayment.findUnique({ where: { id: payment.id } })).status).toBe('COMPLETED')
+    try {
+      const res = await refund(payment.id, 1)
+      const body = JSON.stringify(res.body)
+      expect(res.status).toBe(502)
+      expect(body).not.toContain('simulated provider failure')
+      expect(body).not.toContain('at ')
+      expect((await prisma.orderPayment.findUnique({ where: { id: payment.id } })).status).toBe('COMPLETED')
+      const failedRefund = await prisma.refund.findFirst({ where: { paymentId: payment.id } })
+      expect(failedRefund.status).toBe('FAILED')
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          organizationId: fixture.orgA.organizationId,
+          action: 'PAYMENT_REFUND_FAILED',
+          entity: 'Refund',
+          entityId: failedRefund.id,
+        },
+      })
+      expect(audit).not.toBeNull()
+    } finally {
+      providerSpy.mockRestore()
+    }
   }, 30000)
 
   it('the refund reconciliation returns the order balance to the authoritative amount', async () => {
