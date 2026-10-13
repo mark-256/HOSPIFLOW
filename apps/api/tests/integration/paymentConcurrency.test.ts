@@ -75,18 +75,20 @@ describe('B40 concurrency — order payments', () => {
 
     const succeeded = responses.filter((r) => r.status === 201)
     expect(succeeded.length).toBe(1)
+    expect(responses.filter((r) => r.status === 400)).toHaveLength(9)
 
     const after = await readOrder(prisma, order.id)
     expect(after.paidAmount).toBeLessThanOrEqual(order.total)
     expect(after.balance).toBeGreaterThanOrEqual(0)
     expect(await prisma.orderPayment.count({ where: { orderId: order.id, status: 'COMPLETED' } })).toBe(1)
+    expect(await prisma.orderPayment.count({ where: { orderId: order.id } })).toBe(1)
   }, 120000)
 
   it('10 simultaneous partial order payments still sum to no more than the order total', async () => {
     const order = await createOrderWithItems(app, cashierA, fixture.orgA.outletId, fixture.orgA.productId, 4)
     const each = Math.round(order.total / 2 * 100) / 100
 
-    await Promise.all(
+    const responses = await Promise.all(
       Array.from({ length: 10 }, () =>
         request(app)
           .post(`/api/orders/${order.id}/pay`)
@@ -95,6 +97,7 @@ describe('B40 concurrency — order payments', () => {
       )
     )
 
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(2)
     const agg = await prisma.orderPayment.aggregate({
       _sum: { amount: true },
       where: { orderId: order.id, status: 'COMPLETED' },
@@ -328,21 +331,79 @@ describe('B40 concurrency — payment against cancellation and order completion'
     expect(Number(agg._sum.amount ?? 0)).toBe(0)
   }, 120000)
 
-  it('a payment racing order item additions never collects more than the final total', async () => {
+  it('revalidates cancellation after waiting for the order row lock', async () => {
+    const order = await createOrderWithItems(app, cashierA, fixture.orgA.outletId, fixture.orgA.productId)
+    let markCancelled!: () => void
+    let releaseCancellation!: () => void
+    const cancellationStarted = new Promise<void>((resolve) => {
+      markCancelled = resolve
+    })
+    const holdCancellation = new Promise<void>((resolve) => {
+      releaseCancellation = resolve
+    })
+    const cancellation = prisma.$transaction(async (tx: any) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: 'CANCELLED' } })
+      markCancelled()
+      await holdCancellation
+    })
+
+    await cancellationStarted
+    const payment = request(app)
+      .post(`/api/orders/${order.id}/pay`)
+      .set(authHeaders(cashierA))
+      .send({ paymentMethod: 'CASH', amount: order.total, provider: 'MOCK' })
+      .then((response) => response)
+
+    let waitingForOrderLock = false
+    try {
+      for (let attempt = 0; attempt < 100 && !waitingForOrderLock; attempt += 1) {
+        const rows = await prisma.$queryRaw<Array<{ waiting: boolean }>>`
+          SELECT EXISTS (
+            SELECT 1
+              FROM pg_stat_activity
+             WHERE datname = current_database()
+               AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock'
+               AND query ILIKE '%FROM "Order"%'
+               AND query ILIKE '%FOR UPDATE%'
+          ) AS waiting
+        `
+        waitingForOrderLock = rows[0]?.waiting ?? false
+        if (!waitingForOrderLock) await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    } finally {
+      releaseCancellation()
+    }
+
+    await cancellation
+    const response = await payment
+
+    expect(waitingForOrderLock).toBe(true)
+    expect(response.status).toBe(400)
+    expect(await prisma.orderPayment.count({ where: { orderId: order.id } })).toBe(0)
+  }, 120000)
+
+  it('same-key payment retries racing order item additions collect once', async () => {
     const order = await createOrderWithItems(app, cashierA, fixture.orgA.outletId, fixture.orgA.productId)
     const { id } = order
+    const idempotencyKey = `b40-conc-items-${Date.now()}`
 
     const results = await Promise.all([
       ...Array.from({ length: 5 }, () =>
         request(app)
           .post(`/api/orders/${order.id}/pay`)
           .set(authHeaders(cashierA))
+          .set('idempotency-key', idempotencyKey)
           .send({ paymentMethod: 'CASH', amount: order.total, provider: 'MOCK' })
       ),
       ...Array.from({ length: 5 }, () => addItem(app, cashierA, id, fixture.orgA.productId, 1)),
     ])
 
-    const pays = results.slice(0, 5).filter((r: any) => r.status === 201)
+    const pays = results.slice(0, 5)
+    expect(pays.filter((r: any) => r.status === 201)).toHaveLength(1)
+    expect(pays.filter((r: any) => r.status === 200 && r.body.meta?.deduplicated === true)).toHaveLength(4)
+    expect(await prisma.orderPayment.count({ where: { orderId: id } })).toBe(1)
+
     const final = await readOrder(prisma, id)
     const agg = await prisma.orderPayment.aggregate({
       _sum: { amount: true },
@@ -352,7 +413,6 @@ describe('B40 concurrency — payment against cancellation and order completion'
     expect(Number(agg._sum.amount ?? 0)).toBeLessThanOrEqual(Number(final.total) + 0.001)
     expect(final.paidAmount).toBeLessThanOrEqual(Number(final.total) + 0.001)
     expect(final.balance).toBeGreaterThanOrEqual(0)
-    expect(pays.length).toBeLessThanOrEqual(1)
   }, 120000)
 })
 

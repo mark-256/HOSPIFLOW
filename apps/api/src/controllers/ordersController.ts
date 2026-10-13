@@ -17,6 +17,19 @@ function toDecimal(value: unknown): number {
   return parseMonetaryAmount(value, { field: 'amount', max: MAX_MONEY_10_2 })
 }
 
+function assertIdempotentPaymentMatches(
+  existing: { amount: unknown; paymentMethod: PaymentMethod },
+  amount: number,
+  paymentMethod: PaymentMethod
+): void {
+  if (Math.round(Number(existing.amount) * 100) !== Math.round(amount * 100)) {
+    throw new BadRequestError('Idempotency-Key has already been used for a different amount')
+  }
+  if (existing.paymentMethod !== paymentMethod) {
+    throw new BadRequestError('Idempotency-Key has already been used for a different payment method')
+  }
+}
+
 /** Order statuses that can no longer collect or release money. */
 const NON_COLLECTABLE_ORDER_STATUSES: string[] = [OrderStatus.CANCELLED]
 
@@ -254,16 +267,17 @@ export const ordersController = {
     const amountNum = toDecimal(amount)
 
     if (idempotencyKey) {
-      const existing = await prisma.orderPayment.findFirst({ where: { orderId: order.id, reference: idempotencyKey } })
+      const existing = await prisma.orderPayment.findFirst({
+        where: {
+          orderId: order.id,
+          OR: [
+            { reference: idempotencyKey },
+            { metadata: { path: ['idempotencyKey'], equals: idempotencyKey } },
+          ],
+        },
+      })
       if (existing) {
-        // Reusing one key for a materially different request must not silently
-        // replay the first charge.
-        if (Math.round(Number(existing.amount) * 100) !== Math.round(amountNum * 100)) {
-          throw new BadRequestError('Idempotency-Key has already been used for a different amount')
-        }
-        if (existing.paymentMethod !== validatedMethod) {
-          throw new BadRequestError('Idempotency-Key has already been used for a different payment method')
-        }
+        assertIdempotentPaymentMatches(existing, amountNum, validatedMethod)
         return res.status(200).json({ success: true, data: existing, meta: { deduplicated: true } })
       }
     }
@@ -281,7 +295,35 @@ export const ordersController = {
     // The payment row and the order ledger must move together, and the ledger
     // update is guarded by the authoritative remaining balance so concurrent
     // requests can never both collect the same money.
-    const payment = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`order-payment:${order.id}:${idempotencyKey}`}))`
+
+        const existing = await tx.orderPayment.findFirst({
+          where: {
+            orderId: order.id,
+            OR: [
+              { reference: idempotencyKey },
+              { metadata: { path: ['idempotencyKey'], equals: idempotencyKey } },
+            ],
+          },
+        })
+        if (existing) {
+          assertIdempotentPaymentMatches(existing, amountNum, validatedMethod)
+          return { payment: existing, idempotent: true }
+        }
+      }
+
+      const [lockedOrder] = await tx.$queryRaw<Array<{ status: OrderStatus }>>`
+        SELECT "status"
+          FROM "Order"
+         WHERE "id" = ${order.id}
+         FOR UPDATE
+      `
+      if (!lockedOrder || NON_COLLECTABLE_ORDER_STATUSES.includes(String(lockedOrder.status))) {
+        throw new BadRequestError('Cannot collect payment on a non-collectable order')
+      }
+
       const created = await tx.orderPayment.create({
         data: {
           orderId: order.id,
@@ -291,6 +333,7 @@ export const ordersController = {
           provider: validatedProvider,
           status: PaymentStatus.COMPLETED,
           paidAt: new Date(),
+          metadata: idempotencyKey ? { idempotencyKey } : undefined,
         },
       })
 
@@ -299,9 +342,14 @@ export const ordersController = {
         throw new BadRequestError('Amount exceeds balance')
       }
 
-      return created
+      return { payment: created, idempotent: false }
     })
 
+    if (result.idempotent) {
+      return res.status(200).json({ success: true, data: result.payment, meta: { deduplicated: true } })
+    }
+
+    const payment = result.payment
     await prisma.auditLog.create({
       data: {
         organizationId: req.user!.organizationId,
