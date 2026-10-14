@@ -37,7 +37,15 @@ parse_url() {
   dbname="${dbname%%\?*}"
 
   local host port user password
-  if [[ "$hostport" == *:* ]]; then
+  if [[ "$hostport" == \[*\]:* ]]; then
+    host="${hostport%%]*}"
+    host="${host#\[}"
+    port="${hostport##*:}"
+  elif [[ "$hostport" == \[*\] ]]; then
+    host="${hostport#\[}"
+    host="${host%\]}"
+    port="5432"
+  elif [[ "$hostport" == *:* ]]; then
     host="${hostport%%:*}"
     port="${hostport##*:}"
   else
@@ -68,17 +76,33 @@ if [ -z "${DATABASE_TEST_URL:-}" ]; then
 fi
 
 TEST_DB_URL="$DATABASE_TEST_URL"
+TEST_DB_HOST=$(node -e '
+  try {
+    const url = new URL(process.argv[1])
+    if (!["postgres:", "postgresql:"].includes(url.protocol)) process.exit(1)
+    process.stdout.write(url.hostname.toLowerCase())
+  } catch {
+    process.exit(1)
+  }
+' "$TEST_DB_URL") || die "Could not parse DATABASE_TEST_URL"
 
 DEV_DB_NAME=$(echo "$DB_URL" | sed -E 's|.*/([^/?]+).*|\1|')
 TEST_DB_NAME=$(echo "$TEST_DB_URL" | sed -E 's|.*/([^/?]+).*|\1|')
 
 [ -n "$TEST_DB_NAME" ] || die "Could not parse database name from DATABASE_TEST_URL"
 
+case "$TEST_DB_HOST" in
+  localhost|127.0.0.1|::1|'[::1]') ;;
+  *) die "DATABASE_TEST_URL must target a local database host." ;;
+esac
+
+if [ "$TEST_DB_NAME" != "hospiflow_test" ]; then
+  die "DATABASE_TEST_URL must target the dedicated 'hospiflow_test' database."
+fi
+
 # --- Safety Guard 2: never target the development database -------------------
 if [ "$TEST_DB_NAME" = "$DEV_DB_NAME" ]; then
   echo -e "${RED}REFUSING TO RUN:${NC} DATABASE_TEST_URL points to the same database as DATABASE_URL."
-  echo "  DATABASE_URL:      $DB_URL"
-  echo "  DATABASE_TEST_URL: $TEST_DB_URL"
   echo
   echo "The test database must be physically separate from the development database."
   exit 1
@@ -92,10 +116,9 @@ case "$TEST_DB_NAME" in
     exit 1
     ;;
 esac
-
 echo -e "${GREEN}Test database isolation verified${NC}"
-echo "  DATABASE_URL:      $DB_URL (development — will NOT be touched)"
-echo "  DATABASE_TEST_URL: $TEST_DB_URL (test)"
+echo -e "${GREEN}Test database isolation verified${NC}"
+echo "  Target: $TEST_DB_HOST / $TEST_DB_NAME (credentials omitted)"
 echo
 
 # --- Parse the TEST connection only (DATABASE_URL is never parsed for commands)
@@ -136,5 +159,5 @@ DATABASE_URL="$TEST_DB_URL" npx prisma migrate deploy \
 echo
 echo -e "${GREEN}Test database setup complete.${NC}"
 echo "To run the integration suite:"
-echo "  export DATABASE_TEST_URL=\"$TEST_DB_URL\""
+echo "  Export DATABASE_TEST_URL in your shell before running tests."
 echo "  npm test"

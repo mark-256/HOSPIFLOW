@@ -23,44 +23,50 @@ Then run:
 
 const TEST_DB_URL = getTestDbUrl()
 
-function parseDbName(url: string): string | null {
+function parseDbUrl(url: string): URL | null {
   try {
-    const u = new URL(url.replace(/^postgres/, 'postgresql'))
-    return u.pathname.replace(/^\//, '') || null
+    const normalized = url.replace(/^postgres:\/\//, 'postgresql://')
+    const parsed = new URL(normalized)
+    return parsed.protocol === 'postgresql:' ? parsed : null
   } catch {
     return null
   }
+}
+
+function parseDbName(url: string): string | null {
+  const parsed = parseDbUrl(url)
+  return parsed ? parsed.pathname.replace(/^\//, '') || null : null
 }
 
 function parseDbHost(url: string): string | null {
-  try {
-    const u = new URL(url.replace(/^postgres/, 'postgresql'))
-    return u.hostname || null
-  } catch {
-    return null
-  }
+  return parseDbUrl(url)?.hostname || null
 }
 
 function parseDbPort(url: string): number | null {
-  try {
-    const u = new URL(url.replace(/^postgres/, 'postgresql'))
-    return u.port ? parseInt(u.port, 10) : null
-  } catch {
-    return null
-  }
+  const port = parseDbUrl(url)?.port
+  return port ? parseInt(port, 10) : null
 }
 
 export function assertTestDbIsolated(devDbUrl: string | undefined): void {
   const testName = parseDbName(TEST_DB_URL)
-  if (!testName) return
+  const testHost = parseDbHost(TEST_DB_URL)?.toLowerCase()
+  const localHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+  if (testName !== 'hospiflow_test' || !testHost || !localHosts.has(testHost)) {
+    console.error(`
+TEST DATABASE CONFIGURATION ERROR:
+DATABASE_TEST_URL must target the dedicated local 'hospiflow_test' database.
+`)
+    throw new Error(
+      'DATABASE_TEST_URL must target the dedicated local hospiflow_test database.'
+    )
+  }
 
   // Always reject the known development/production database name
-  if (testName === 'hospiflow') {
+  if (parseDbName(TEST_DB_URL) === 'hospiflow') {
     console.error(`
 TEST DATABASE CONFIGURATION ERROR:
 DATABASE_TEST_URL resolves to the 'hospiflow' database.
-
-DATABASE_TEST_URL: ${TEST_DB_URL}
 
 The test database must be physically separate from the development database.
 The database name 'hospiflow' is used by the normal development and production
@@ -90,9 +96,6 @@ Use a dedicated test database name (e.g. 'hospiflow_test'):
       console.error(`
 TEST DATABASE CONFIGURATION ERROR:
 DATABASE_TEST_URL points to the same database as DATABASE_URL.
-
-DATABASE_URL:      ${devDbUrl}
-DATABASE_TEST_URL: ${TEST_DB_URL}
 
 The test database must be physically separate from the development database.
 Refusing to start tests that could destroy development data.

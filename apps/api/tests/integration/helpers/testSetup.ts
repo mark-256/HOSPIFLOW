@@ -38,4 +38,4 @@ if (process.env.NODE_ENV !== 'test') {
   process.env.NODE_ENV = 'test'
 }
 
-console.log('[B38] Test database isolation verified — using:', TEST_DB_URL)
+console.log('[B38] Test database isolation verified — using local hospiflow_test')
