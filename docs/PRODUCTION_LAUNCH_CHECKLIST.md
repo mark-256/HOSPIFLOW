@@ -14,7 +14,7 @@ Status values: `VERIFIED IN PRODUCTION`, `PASS`, `FAIL`, `NOT VERIFIED`, `NOT AP
 - [x] Mock payments disabled — **VERIFIED IN PRODUCTION** (fail-closed verified: 4 scenarios tested)
 - [x] Database backup available — **VERIFIED IN PRODUCTION** (backup created, 13,376 bytes, 534 SQL statements)
 - [x] Migration status reviewed — **VERIFIED IN PRODUCTION** (2 migrations applied via `prisma migrate deploy`)
-- [x] Production-safe bootstrap confirmed — **VERIFIED IN PRODUCTION** (seed prohibited; no production bootstrap required)
+- [x] Production-safe bootstrap confirmed — **VERIFIED IN PRODUCTION** (installation-specific seed creates the initial organization, property, and administrator; no sample operational data)
 - [x] Docker images built — **VERIFIED IN PRODUCTION** (API, Web, Worker production images built and deployed)
 - [x] Image security checked — **VERIFIED IN PRODUCTION** (non-root uid 1001; no `.env` or secrets in images)
 - [x] Rollback release identified — **VERIFIED IN PRODUCTION** (B38.5 images available: `hospiflow-b385_api/web/worker:latest`)
@@ -292,4 +292,4 @@ Status: **CONDITIONAL GO** — Application and infrastructure production-ready; 
 
 ## Seed Safety
 
-`xbp run db:seed` is development-only and creates demo organizations, users, rooms, reservations, orders, and financial records. **DO NOT RUN IN PRODUCTION.** No production bootstrap is required beyond migrations.
+`npm run db:seed` requires installation-specific `HOTEL_*` values and creates only the configured organization, property, administrator role, and initial administrator. It does not create sample operational records. Run it once after migrations when initializing a new installation.

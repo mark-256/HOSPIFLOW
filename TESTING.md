@@ -51,8 +51,13 @@ Runs the isolation, Redis, BullMQ and development-database-protection checks.
 ## E2E
 
 ```bash
+export E2E_EMAIL="your-installed-admin@example.com"
+export E2E_PASSWORD="your-installed-admin-password"
 npm run test:e2e
 ```
+
+The browser flow uses the configured installation administrator; no demo login
+credentials are provided.
 
 ## API
 

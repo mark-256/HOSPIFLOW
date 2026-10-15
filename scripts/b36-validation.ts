@@ -5,14 +5,17 @@
 import { writeFileSync } from 'fs'
 
 const API = 'http://localhost:3001'
-const EMAIL = process.env.B36_EMAIL || 'admin@hospiflow.com'
-const PASSWORD = process.env.B36_PASSWORD || 'admin123'
+const EMAIL = process.env.B36_EMAIL
+const PASSWORD = process.env.B36_PASSWORD
+if (!EMAIL || !PASSWORD) {
+  throw new Error('Set B36_EMAIL and B36_PASSWORD to an installed HOSPIFLOW administrator account.')
+}
 const DB_URL =
   process.env.DATABASE_URL || 'postgresql://hospiflow:hospiflow_dev@localhost:5432/hospiflow'
 
 /**
  * Tenant identifiers are discovered dynamically from the authenticated session
- * instead of being hardcoded, so the suite stays bound to whichever seeded
+ * instead of being hardcoded, so the suite stays bound to whichever configured
  * environment is currently active. They are populated by discoverFixtures()
  * immediately after login succeeds.
  */

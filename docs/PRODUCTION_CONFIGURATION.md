@@ -51,7 +51,7 @@ docker compose -f docker-compose.production.yml up -d
 5. Set `JWT_SECRET` and `JWT_REFRESH_SECRET` with strong random values
 6. Set `PAYMENT_PROVIDER` to `MPESA` or `STRIPE` with credentials (MOCK will fail)
 7. Run `npx prisma migrate deploy`
-8. **DO NOT** run `npm run db:seed` — it creates development data
+8. Set the `HOTEL_*` installation values and run `npm run db:seed` once to create the configured organization, property, and initial administrator. This creates no sample operational data and fails if records already conflict.
 
 ### Fail-Closed Behavior
 - MOCK payment provider is NOT ALLOWED in production (enforced by PaymentProviderFactory)

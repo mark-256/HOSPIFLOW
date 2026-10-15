@@ -1,9 +1,15 @@
 import { expect, test } from '@playwright/test';
 
-test('a seeded user can sign in and load hotel operations', async ({ page }) => {
+test('the configured administrator can sign in and load hotel operations', async ({ page }) => {
+  const email = process.env.E2E_EMAIL
+  const password = process.env.E2E_PASSWORD
+  if (!email || !password) {
+    throw new Error('Set E2E_EMAIL and E2E_PASSWORD to an installed HOSPIFLOW administrator account.')
+  }
+
   await page.goto('/login');
-  await page.getByLabel('Email').fill(process.env.E2E_EMAIL ?? 'admin@hospiflow.com');
-  await page.getByLabel('Password').fill(process.env.E2E_PASSWORD ?? 'admin123');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
